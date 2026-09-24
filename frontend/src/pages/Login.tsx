@@ -1,0 +1,10 @@
+import { useNavigate } from "react-router-dom";
+import { Zap, ShieldCheck } from "lucide-react";
+import { useSession } from "../lib/SessionContext";
+
+export function Login(){
+  const navigate=useNavigate(); const {signIn,pushToast}=useSession();
+  async function handle(){try{await signIn();pushToast("Signed in with Microsoft Entra ID.","success");navigate("/dashboard");}catch(e){pushToast(e instanceof Error?e.message:"Microsoft sign-in failed","error")}}
+  return <div className="flex h-screen w-screen items-center justify-center bg-[var(--color-navy-950)] p-4"><div className="w-full max-w-md rounded-xl border border-white/10 bg-[var(--color-navy-900)] p-8 shadow-2xl"><div className="mb-2 flex items-center justify-center gap-2"><span className="flex h-9 w-9 items-center justify-center rounded-md bg-[var(--color-orange-500)]"><Zap size={18} className="text-white" fill="currentColor"/></span><span className="text-xl font-semibold text-white">SpikeOS</span></div><p className="mb-7 text-center text-sm text-white/60">Communication Effectiveness — Spike Electric</p><button onClick={handle} className="flex w-full items-center justify-center gap-2 rounded-md bg-white px-4 py-2.5 text-sm font-medium text-[var(--color-navy-900)] hover:bg-white/90"><MicrosoftMark/>Sign in with Microsoft</button><div className="mt-5 flex items-start gap-2 rounded-md border border-[var(--color-blue-500)]/40 bg-[var(--color-blue-500)]/10 px-3 py-2.5"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-[var(--color-blue-400)]"/><p className="text-[11px] leading-relaxed text-white/60">Access is determined by Microsoft Entra ID and the server-side SpikeOS hierarchy. Manager and leadership visibility is never granted by a client-side toggle.</p></div></div></div>
+}
+function MicrosoftMark(){return <svg width="16" height="16" viewBox="0 0 16 16"><rect width="7" height="7" x="0" y="0" fill="#F25022"/><rect width="7" height="7" x="9" y="0" fill="#7FBA00"/><rect width="7" height="7" x="0" y="9" fill="#00A4EF"/><rect width="7" height="7" x="9" y="9" fill="#FFB900"/></svg>}
