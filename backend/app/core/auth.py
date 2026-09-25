@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import time
@@ -13,42 +14,32 @@ _jwks_cache: dict = {
 }
 
 
-async def _jwks(*, graph: bool = False) -> list[dict]:
+async def _jwks() -> list[dict]:
     """
-    Get Microsoft Entra signing keys.
+    Get Microsoft Entra signing keys for normal SpikeOS API-token validation.
 
-    SpikeOS API tokens and Microsoft Graph tokens can use different
-    token versions/issuers, so Graph validation uses the Graph-compatible
-    discovery metadata.
+    The Outlook Graph-token path does not use this function because the
+    Microsoft Graph access token is forwarded directly to Microsoft Graph.
     """
     global _jwks_cache
 
-    cache_key = "graph" if graph else "default"
-
-    cached = _jwks_cache.get(cache_key)
-
     if (
-        isinstance(cached, dict)
-        and cached.get("keys")
-        and cached.get("expires", 0.0) > time.time()
+        _jwks_cache["keys"]
+        and _jwks_cache["expires"] > time.time()
     ):
-        return cached["keys"]
+        return _jwks_cache["keys"]
 
     if not settings.microsoft_tenant_id:
-        raise HTTPException(500, "Microsoft tenant is not configured")
+        raise HTTPException(
+            500,
+            "Microsoft tenant is not configured",
+        )
 
-    if graph:
-        discovery = (
-            f"https://login.microsoftonline.com/"
-            f"{settings.microsoft_tenant_id}"
-            f"/v2.0/.well-known/openid-configuration"
-        )
-    else:
-        discovery = (
-            f"{settings.microsoft_authority}/"
-            f"{settings.microsoft_tenant_id}"
-            f"/v2.0/.well-known/openid-configuration"
-        )
+    discovery = (
+        f"{settings.microsoft_authority}/"
+        f"{settings.microsoft_tenant_id}"
+        f"/v2.0/.well-known/openid-configuration"
+    )
 
     async with httpx.AsyncClient(timeout=15) as client:
         cfg = (
@@ -59,7 +50,7 @@ async def _jwks(*, graph: bool = False) -> list[dict]:
             await client.get(cfg["jwks_uri"])
         ).raise_for_status().json()["keys"]
 
-    _jwks_cache[cache_key] = {
+    _jwks_cache = {
         "expires": time.time() + 3600,
         "keys": keys,
     }
@@ -71,58 +62,36 @@ async def validate_token(
     token: str,
     *,
     audience: str | None = None,
-    graph: bool = False,
 ) -> dict:
     """
-    Validate a Microsoft identity token.
+    Validate a normal Microsoft Entra access token issued for SpikeOS.
 
-    For normal SpikeOS API tokens:
-        audience = SpikeOS API Application ID URI
-
-    For Microsoft Graph tokens:
-        audience = https://graph.microsoft.com
-
-    Graph tokens are validated against their actual issuer/version.
+    This is used by the normal SpikeOS web application authentication
+    flow, such as /me and /bootstrap.
     """
 
-    if not settings.microsoft_tenant_id:
+    if (
+        not settings.microsoft_tenant_id
+        or not settings.microsoft_client_id
+    ):
         raise HTTPException(
             500,
-            "Microsoft tenant configuration missing",
+            "Microsoft identity configuration missing",
         )
 
     try:
-        unverified_claims = jwt.get_unverified_claims(token)
-
         header = jwt.get_unverified_header(token)
 
-        print(
-            "[AUTH DEBUG] token issuer:",
-            unverified_claims.get("iss"),
-        )
-        print(
-            "[AUTH DEBUG] token audience:",
-            unverified_claims.get("aud"),
-        )
-        print(
-            "[AUTH DEBUG] token version:",
-            unverified_claims.get("ver"),
-        )
-
-        keys = await _jwks(graph=graph)
-
         key = next(
-            k for k in keys
+            k
+            for k in await _jwks()
             if k["kid"] == header["kid"]
         )
 
-        actual_issuer = unverified_claims.get("iss")
-
-        if not actual_issuer:
-            raise HTTPException(
-                401,
-                "Microsoft identity token has no issuer",
-            )
+        issuer = (
+            f"https://sts.windows.net/"
+            f"{settings.microsoft_tenant_id}/"
+        )
 
         aud = (
             audience
@@ -135,22 +104,10 @@ async def validate_token(
             key,
             algorithms=["RS256"],
             audience=aud,
-            issuer=actual_issuer,
+            issuer=issuer,
         )
 
-        # Explicitly verify that the token belongs to our tenant.
-        token_tenant = claims.get("tid")
-
-        if token_tenant != settings.microsoft_tenant_id:
-            raise HTTPException(
-                401,
-                "Microsoft identity token belongs to an unexpected tenant",
-            )
-
         return claims
-
-    except HTTPException:
-        raise
 
     except StopIteration as exc:
         raise HTTPException(
@@ -170,9 +127,14 @@ async def get_current_user(
 ):
     """
     Validate a normal SpikeOS API access token.
+
+    Used by the main SpikeOS web application.
     """
 
-    if not authorization or not authorization.startswith("Bearer "):
+    if (
+        not authorization
+        or not authorization.startswith("Bearer ")
+    ):
         raise HTTPException(
             401,
             "Bearer token required",
@@ -218,51 +180,37 @@ async def get_graph_user(
     authorization: str | None = Header(default=None),
 ):
     """
-    Validate a Microsoft Graph access token received from
-    the Outlook NAA add-in and return the token so GraphService
-    can forward it to Microsoft Graph.
+    Receive a Microsoft Graph access token from the Outlook NAA add-in.
+
+    This token is intentionally NOT validated as a SpikeOS API token.
+
+    The token is forwarded unchanged to Microsoft Graph, which is the
+    resource for which the token was issued.
     """
 
-    if not authorization or not authorization.startswith("Bearer "):
+    if (
+        not authorization
+        or not authorization.startswith("Bearer ")
+    ):
         raise HTTPException(
             401,
             "Bearer Graph token required",
         )
 
-    token = authorization.split(" ", 1)[1]
+    token = authorization.split(" ", 1)[1].strip()
 
-    claims = await validate_token(
-        token,
-        audience="https://graph.microsoft.com",
-        graph=True,
-    )
-
-    oid = claims.get("oid")
-
-    if not oid:
+    if not token:
         raise HTTPException(
             401,
-            "Graph token has no object id",
+            "Graph access token is empty",
         )
 
-    scopes = (
-        claims.get("scp") or ""
-    ).split()
-
     return {
-        "id": oid,
-        "name": (
-            claims.get("name")
-            or claims.get("preferred_username")
-            or "Microsoft user"
-        ),
-        "email": (
-            claims.get("preferred_username")
-            or claims.get("upn")
-            or claims.get("email")
-        ),
-        "roles": claims.get("roles", []),
-        "scopes": scopes,
+        "id": None,
+        "name": "Microsoft Graph user",
+        "email": None,
+        "roles": [],
+        "scopes": [],
         "access_token": token,
     }
 
