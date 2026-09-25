@@ -1,29 +1,27 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
-           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-           xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
-           xsi:type="MailApp">
-  <Id>8a4d4b0e-4e6b-4d77-a4b4-0e5a7c2f1a10</Id>
-  <Version>1.1.0.0</Version>
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+ xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+ xsi:type="MailApp">
+  <Id>286076cf-5646-458d-9483-b91f1e448424</Id>
+  <Version>2.0.0.0</Version>
   <ProviderName>Spike Electric</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="SpikeOS Communication Intelligence"/>
   <Description DefaultValue="SpikeOS inbox intelligence and communication performance inside Outlook."/>
-  <IconUrl DefaultValue="__ADDIN_URL__/icon-32.png"/>
-  <HighResolutionIconUrl DefaultValue="__ADDIN_URL__/icon-80.png"/>
-  <SupportUrl DefaultValue="__SUPPORT_URL__"/>
+  <IconUrl DefaultValue="https://spikeos-production-outlook.vercel.app/icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="https://spikeos-production-outlook.vercel.app/icon-80.png"/>
+  <SupportUrl DefaultValue="https://spikeos-production.vercel.app/#/help"/>
   <AppDomains>
-    <AppDomain>__ADDIN_URL__</AppDomain>
+    <AppDomain>https://spikeos-production-outlook.vercel.app</AppDomain>
   </AppDomains>
   <Hosts><Host Name="Mailbox"/></Hosts>
-  <Requirements>
-    <Sets><Set Name="Mailbox" MinVersion="1.5"/></Sets>
-  </Requirements>
+  <Requirements><Sets><Set Name="Mailbox" MinVersion="1.5"/></Sets></Requirements>
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="__ADDIN_URL__/"/>
-        <RequestedHeight>600</RequestedHeight>
+        <SourceLocation DefaultValue="https://spikeos-production-outlook.vercel.app/"/>
+        <RequestedHeight>450</RequestedHeight>
       </DesktopSettings>
     </Form>
   </FormSettings>
@@ -34,14 +32,63 @@
   <DisableEntityHighlighting>false</DisableEntityHighlighting>
 
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides"
-                    xsi:type="VersionOverridesV1_0">
+    xsi:type="VersionOverridesV1_0">
+    <Description resid="residDescription"/>
+    <Requirements>
+      <bt:Sets DefaultMinVersion="1.5"><bt:Set Name="Mailbox"/></bt:Sets>
+    </Requirements>
+    <Hosts>
+      <Host xsi:type="MailHost">
+        <DesktopFormFactor>
+          <ExtensionPoint xsi:type="MessageReadCommandSurface">
+            <OfficeTab id="TabDefault">
+              <Group id="SpikeOSGroup">
+                <Label resid="groupLabel"/>
+                <Control xsi:type="Button" id="SpikeOSOpenTaskPane">
+                  <Label resid="buttonLabel"/>
+                  <Supertip>
+                    <Title resid="buttonLabel"/>
+                    <Description resid="buttonDescription"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="icon16"/>
+                    <bt:Image size="32" resid="icon32"/>
+                    <bt:Image size="80" resid="icon80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="taskPaneUrl"/>
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+    <Resources>
+      <bt:Images>
+        <bt:Image id="icon16" DefaultValue="https://spikeos-production-outlook.vercel.app/icon-32.png"/>
+        <bt:Image id="icon32" DefaultValue="https://spikeos-production-outlook.vercel.app/icon-32.png"/>
+        <bt:Image id="icon80" DefaultValue="https://spikeos-production-outlook.vercel.app/icon-80.png"/>
+      </bt:Images>
+      <bt:Urls>
+        <bt:Url id="taskPaneUrl" DefaultValue="https://spikeos-production-outlook.vercel.app/"/>
+      </bt:Urls>
+      <bt:ShortStrings>
+        <bt:String id="groupLabel" DefaultValue="SpikeOS"/>
+        <bt:String id="buttonLabel" DefaultValue="Open SpikeOS"/>
+        <bt:String id="residDescription" DefaultValue="SpikeOS Communication Intelligence"/>
+      </bt:ShortStrings>
+      <bt:LongStrings>
+        <bt:String id="buttonDescription" DefaultValue="Open the SpikeOS inbox communication summary and message intelligence."/>
+      </bt:LongStrings>
+    </Resources>
+
     <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1"
-                      xsi:type="VersionOverridesV1_1">
+      xsi:type="VersionOverridesV1_1">
       <Description resid="residDescription"/>
       <Requirements>
-        <bt:Sets DefaultMinVersion="1.5">
-          <bt:Set Name="Mailbox"/>
-        </bt:Sets>
+        <bt:Sets DefaultMinVersion="1.5"><bt:Set Name="Mailbox"/></bt:Sets>
       </Requirements>
       <Hosts>
         <Host xsi:type="MailHost">
@@ -75,24 +122,25 @@
       </Hosts>
       <Resources>
         <bt:Images>
-          <bt:Image id="icon16" DefaultValue="__ADDIN_URL__/icon-32.png"/>
-          <bt:Image id="icon32" DefaultValue="__ADDIN_URL__/icon-32.png"/>
-          <bt:Image id="icon80" DefaultValue="__ADDIN_URL__/icon-80.png"/>
+          <bt:Image id="icon16" DefaultValue="https://spikeos-production-outlook.vercel.app/icon-32.png"/>
+          <bt:Image id="icon32" DefaultValue="https://spikeos-production-outlook.vercel.app/icon-32.png"/>
+          <bt:Image id="icon80" DefaultValue="https://spikeos-production-outlook.vercel.app/icon-80.png"/>
         </bt:Images>
         <bt:Urls>
-          <bt:Url id="taskPaneUrl" DefaultValue="__ADDIN_URL__/"/>
+          <bt:Url id="taskPaneUrl" DefaultValue="https://spikeos-production-outlook.vercel.app/"/>
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="groupLabel" DefaultValue="SpikeOS"/>
           <bt:String id="buttonLabel" DefaultValue="Open SpikeOS"/>
+          <bt:String id="residDescription" DefaultValue="SpikeOS Communication Intelligence"/>
         </bt:ShortStrings>
         <bt:LongStrings>
           <bt:String id="buttonDescription" DefaultValue="Open the SpikeOS inbox communication summary and message intelligence."/>
         </bt:LongStrings>
       </Resources>
       <WebApplicationInfo>
-        <Id>__MICROSOFT_CLIENT_ID__</Id>
-        <Resource>__MICROSOFT_APP_ID_URI__</Resource>
+        <Id>b3852906-28dd-4da8-a174-4831dba9ea0d</Id>
+        <Resource>api://b3852906-28dd-4da8-a174-4831dba9ea0d</Resource>
         <Scopes>
           <Scope>openid</Scope>
           <Scope>profile</Scope>
