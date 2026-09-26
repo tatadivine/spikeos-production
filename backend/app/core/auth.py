@@ -181,10 +181,12 @@ async def get_graph_user(
     """
     Receive a Microsoft Graph access token from the Outlook NAA add-in.
 
-    This token is intentionally NOT validated as a SpikeOS API token.
+    The token is issued for Microsoft Graph, so it is intentionally NOT
+    validated as a SpikeOS API token.
 
-    The token is forwarded unchanged to Microsoft Graph, which is the
-    resource for which the token was issued.
+    Instead, Microsoft Graph is queried using the token to determine
+    the signed-in Microsoft 365 user's identity. The Graph user ID is
+    then used as the SpikeOS owner/profile ID.
     """
 
     if (
@@ -192,24 +194,86 @@ async def get_graph_user(
         or not authorization.startswith("Bearer ")
     ):
         raise HTTPException(
-            401,
-            "Bearer Graph token required",
+            status_code=401,
+            detail="Bearer Graph token required",
         )
 
     token = authorization.split(" ", 1)[1].strip()
 
     if not token:
         raise HTTPException(
-            401,
-            "Graph access token is empty",
+            status_code=401,
+            detail="Graph access token is empty",
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.get(
+                "https://graph.microsoft.com/v1.0/me",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/json",
+                },
+                params={
+                    "$select": "id,displayName,mail,userPrincipalName",
+                },
+            )
+
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to contact Microsoft Graph",
+        ) from exc
+
+    if response.status_code >= 400:
+        try:
+            graph_error = response.json().get("error", {})
+            graph_code = graph_error.get("code")
+            graph_message = graph_error.get("message")
+        except Exception:
+            graph_code = None
+            graph_message = None
+
+        detail = (
+            "Microsoft Graph /me request failed "
+            f"with status {response.status_code}"
+        )
+
+        if graph_code:
+            detail += f" ({graph_code})"
+
+        if graph_message:
+            detail += f": {graph_message}"
+
+        raise HTTPException(
+            status_code=502,
+            detail=detail,
+        )
+
+    try:
+        graph_user = response.json()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Microsoft Graph returned an invalid response",
+        ) from exc
+
+    graph_id = graph_user.get("id")
+
+    if not graph_id:
+        raise HTTPException(
+            status_code=502,
+            detail="Microsoft Graph did not return a user ID",
         )
 
     return {
-        "id": None,
-        "name": "Microsoft Graph user",
-        "email": None,
+        "id": graph_id,
+        "name": graph_user.get("displayName"),
+        "email": (
+            graph_user.get("mail")
+            or graph_user.get("userPrincipalName")
+        ),
         "roles": [],
         "scopes": [],
         "access_token": token,
     }
-
