@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-
 import { AppShell } from "../components/layout/AppShell";
 import { Card, SectionHeader } from "../components/ui/Card";
 import {
@@ -11,140 +10,108 @@ import {
 } from "../components/ui/Badge";
 import { Timeline } from "../components/ui/Timeline";
 import { ContextDrawer } from "../components/performance/ContextDrawer";
-import { CommitmentCard } from "../components/communication/CommitmentCard";
 import { getCommunication } from "../mock/generator";
 import { formatDateTime } from "../lib/format";
 import { useSession } from "../lib/SessionContext";
+import { ErrorState } from "../components/ui/States";
 import { api } from "../lib/api";
 import { loadLiveBootstrap } from "../lib/liveBootstrap";
-import { ErrorState } from "../components/ui/States";
-import type { Commitment } from "../types";
 
-interface BackendCommitment {
-  id?: string;
-  title?: string;
+type BackendCommitment = {
+  id: string;
+  title: string;
+  source?: string;
   owner_id?: string;
   created_at?: string;
-  due_date?: string;
-  next_step?: string;
+  due_date?: string | null;
   status?: string;
-  communication_id?: string;
-}
+  next_step?: string;
+};
 
-interface CreateCommitmentResponse {
+type UICommitment = {
+  id: string;
+  title: string;
+  source: string;
+  ownerId: string;
+  createdAt: string;
+  dueDate: string;
   status: string;
-  commitment?: BackendCommitment | null;
-}
+  daysOverdue: number;
+  nextAction: string;
+};
 
-interface CommunicationActionResponse {
-  status: string;
-  communication?: Record<string, unknown> | null;
-  alert?: Record<string, unknown> | null;
-}
+function normalizeCommitment(
+  commitment: BackendCommitment
+): UICommitment {
+  const dueDate = commitment.due_date || "";
+  let status = commitment.status || "active";
+  let daysOverdue = 0;
 
-function toInputDate(
-  value: string | null | undefined
-): string {
-  if (value) {
-    const date = new Date(value);
+  if (status !== "completed" && dueDate) {
+    const due = new Date(dueDate);
+    const now = new Date();
+    const diffDays =
+      (due.getTime() - now.getTime()) /
+      (1000 * 60 * 60 * 24);
 
-    if (!Number.isNaN(date.getTime())) {
-      return date.toISOString().slice(0, 10);
-    }
-
-    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-      return value;
+    if (diffDays < 0) {
+      status = "overdue";
+      daysOverdue = Math.max(
+        0,
+        Math.ceil(Math.abs(diffDays))
+      );
+    } else if (diffDays < 1) {
+      status = "due_today";
+    } else if (diffDays < 7) {
+      status = "due_this_week";
+    } else {
+      status = "active";
     }
   }
 
-  const fallback = new Date();
-  fallback.setDate(fallback.getDate() + 7);
-
-  return fallback.toISOString().slice(0, 10);
-}
-
-function normalizeCommitment(
-  commitment: BackendCommitment,
-  communicationSubject: string
-): Commitment {
-  const dueDate =
-    commitment.due_date ||
-    new Date(
-      Date.now() + 7 * 24 * 60 * 60 * 1000
-    )
-      .toISOString()
-      .slice(0, 10);
-
   return {
-    id:
-      commitment.id ||
-      `commitment-${Date.now()}`,
-    title:
-      commitment.title ||
-      communicationSubject,
-    source: "Communication",
-    ownerId:
-      commitment.owner_id || "",
-    createdAt:
-      commitment.created_at ||
-      new Date().toISOString(),
+    id: commitment.id,
+    title: commitment.title,
+    source: commitment.source || "Outlook",
+    ownerId: commitment.owner_id || "",
+    createdAt: commitment.created_at || "",
     dueDate,
-    status: "active",
-    daysOverdue: 0,
+    status,
+    daysOverdue,
     nextAction:
-      commitment.next_step ||
-      "Follow up on this commitment.",
+      commitment.next_step || "Close the loop",
   };
 }
 
 export function CommunicationDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-
   const {
     displayName,
+    employeeId,
     pushToast,
   } = useSession();
 
   const [contextOpen, setContextOpen] =
     useState(false);
 
-  const [
-    commitmentFormOpen,
-    setCommitmentFormOpen,
-  ] = useState(false);
+  const [commitmentFormOpen, setCommitmentFormOpen] =
+    useState(false);
 
-  const [
-    commitmentTitle,
-    setCommitmentTitle,
-  ] = useState("");
+  const [commitmentTitle, setCommitmentTitle] =
+    useState("");
 
-  const [
-    commitmentDueDate,
-    setCommitmentDueDate,
-  ] = useState("");
+  const [commitmentDueDate, setCommitmentDueDate] =
+    useState("");
 
-  const [
-    commitmentNextAction,
-    setCommitmentNextAction,
-  ] = useState("");
+  const [commitmentNextStep, setCommitmentNextStep] =
+    useState("");
 
-  const [
-    commitmentSubmitting,
-    setCommitmentSubmitting,
-  ] = useState(false);
+  const [createdCommitment, setCreatedCommitment] =
+    useState<UICommitment | null>(null);
 
-  const [
-    createdCommitment,
-    setCreatedCommitment,
-  ] = useState<Commitment | null>(null);
-
-  const [
-    actionSubmitting,
-    setActionSubmitting,
-  ] = useState<
-    "complete" | "escalate" | null
-  >(null);
+  const [actionLoading, setActionLoading] =
+    useState(false);
 
   const comm = id
     ? getCommunication(id)
@@ -163,40 +130,30 @@ export function CommunicationDetail() {
     );
   }
 
+  // Keep the successful TypeScript narrowing available
+  // inside event handlers and other nested functions.
+  const communication = comm;
+
   function openCommitmentForm() {
-    setCommitmentTitle(comm.subject);
-
-    setCommitmentDueDate(
-      toInputDate(
-        comm.aiFinding?.dueDate
-      )
+    setCommitmentTitle(communication.subject);
+    setCommitmentDueDate("");
+    setCommitmentNextStep(
+      communication.nextStep || "Follow up with the contact"
     );
-
-    setCommitmentNextAction(
-      comm.aiFinding?.nextAction ||
-        comm.nextStep ||
-        "Follow up on this communication."
-    );
-
     setCommitmentFormOpen(true);
   }
 
   function closeCommitmentForm() {
-    if (commitmentSubmitting) {
-      return;
-    }
+    if (actionLoading) return;
 
     setCommitmentFormOpen(false);
+    setCommitmentTitle("");
+    setCommitmentDueDate("");
+    setCommitmentNextStep("");
   }
 
   async function handleCreateCommitment() {
-    const title =
-      commitmentTitle.trim();
-
-    const nextAction =
-      commitmentNextAction.trim();
-
-    if (!title) {
+    if (!commitmentTitle.trim()) {
       pushToast(
         "Please enter a commitment title.",
         "error"
@@ -204,126 +161,79 @@ export function CommunicationDetail() {
       return;
     }
 
-    if (!commitmentDueDate) {
-      pushToast(
-        "Please select a due date.",
-        "error"
-      );
-      return;
-    }
-
-    if (!nextAction) {
-      pushToast(
-        "Please enter the next action.",
-        "error"
-      );
-      return;
-    }
-
-    setCommitmentSubmitting(true);
+    setActionLoading(true);
 
     try {
-      const response =
-        await api<CreateCommitmentResponse>(
+      const payload = {
+        title: commitmentTitle.trim(),
+        source: "Outlook",
+        owner_id: employeeId,
+        due_date: commitmentDueDate || null,
+        next_step:
+          commitmentNextStep.trim() ||
+          "Follow up with the contact",
+        communication_id: communication.id,
+      };
+
+      const result =
+        await api<BackendCommitment>(
           "/commitments",
           {
             method: "POST",
-            body: JSON.stringify({
-              communication_id:
-                comm.id,
-              title,
-              due_date:
-                commitmentDueDate,
-              next_step:
-                nextAction,
-            }),
+            body: JSON.stringify(payload),
           }
         );
 
-      if (!response.commitment) {
-        throw new Error(
-          "The server did not return the created commitment."
-        );
-      }
-
       const normalized =
-        normalizeCommitment(
-          response.commitment,
-          comm.subject
-        );
+        normalizeCommitment(result);
 
-      setCreatedCommitment(
-        normalized
-      );
-
-      setCommitmentFormOpen(
-        false
-      );
+      setCreatedCommitment(normalized);
+      setCommitmentFormOpen(false);
 
       pushToast(
         "Commitment created successfully.",
         "success"
       );
+
+      await loadLiveBootstrap();
     } catch (error) {
       const message =
         error instanceof Error
           ? error.message
-          : "Unable to create the commitment.";
+          : "Unable to create commitment.";
 
       pushToast(
         `Commitment could not be created: ${message}`,
         "error"
       );
     } finally {
-      setCommitmentSubmitting(
-        false
-      );
-    }
-  }  async function refreshCommunication() {
-    try {
-      await loadLiveBootstrap();
-
-      const refreshed = getCommunication(
-        comm.id
-      );
-
-      if (refreshed) {
-        Object.assign(
-          comm,
-          refreshed
-        );
-      }
-    } catch {
-      // The action itself has already succeeded.
-      // A refresh failure should not turn it into
-      // a failed action.
+      setActionLoading(false);
     }
   }
 
-  async function handleMarkComplete() {
-    if (
-      actionSubmitting ||
-      comm.status === "completed"
-    ) {
-      return;
-    }
+  async function refreshCommunication() {
+    await loadLiveBootstrap();
+  }
 
-    setActionSubmitting("complete");
+  async function handleMarkComplete() {
+    if (actionLoading) return;
+
+    setActionLoading(true);
 
     try {
-      await api<CommunicationActionResponse>(
-        `/communications/${comm.id}/complete`,
+      await api(
+        `/communications/${communication.id}/complete`,
         {
           method: "POST",
         }
       );
 
-      await refreshCommunication();
-
       pushToast(
-        "Communication marked complete.",
+        "Communication marked as complete.",
         "success"
       );
+
+      await refreshCommunication();
     } catch (error) {
       const message =
         error instanceof Error
@@ -331,36 +241,37 @@ export function CommunicationDetail() {
           : "Unable to complete communication.";
 
       pushToast(
-        `Communication could not be completed: ${message}`,
+        `Unable to mark communication complete: ${message}`,
         "error"
       );
     } finally {
-      setActionSubmitting(null);
+      setActionLoading(false);
     }
   }
 
   async function handleEscalate() {
-    if (actionSubmitting) {
-      return;
-    }
+    if (actionLoading) return;
 
-    setActionSubmitting("escalate");
+    setActionLoading(true);
 
     try {
-      await api<CommunicationActionResponse>(
-        `/communications/${comm.id}/escalate`,
+      await api(
+        `/communications/${communication.id}/escalate`,
         {
           method: "POST",
-          body: JSON.stringify({}),
+          body: JSON.stringify({
+            reason:
+              "Communication escalated for manager review.",
+          }),
         }
       );
-
-      await refreshCommunication();
 
       pushToast(
         "Communication escalated successfully.",
         "success"
       );
+
+      await refreshCommunication();
     } catch (error) {
       const message =
         error instanceof Error
@@ -368,11 +279,11 @@ export function CommunicationDetail() {
           : "Unable to escalate communication.";
 
       pushToast(
-        `Communication could not be escalated: ${message}`,
+        `Unable to escalate communication: ${message}`,
         "error"
       );
     } finally {
-      setActionSubmitting(null);
+      setActionLoading(false);
     }
   }
 
@@ -394,31 +305,31 @@ export function CommunicationDetail() {
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <h2 className="text-base font-semibold text-[var(--color-ink-900)]">
-                  {comm.subject}
+                  {communication.subject}
                 </h2>
 
                 <p className="mt-1 text-xs text-[var(--color-ink-500)]">
-                  {comm.contact} ·{" "}
-                  {comm.organization} ·{" "}
-                  {comm.category}
+                  {communication.contact} ·{" "}
+                  {communication.organization} ·{" "}
+                  {communication.category}
                 </p>
               </div>
 
               <div className="flex shrink-0 flex-row flex-wrap items-center gap-1.5 sm:flex-col sm:items-end">
                 <StatusBadge
-                  label={comm.status.replace(
+                  label={communication.status.replace(
                     "_",
                     " "
                   )}
                   tone={statusToTone(
-                    comm.status
+                    communication.status
                   )}
                 />
 
                 <StatusBadge
-                  label={comm.priority}
+                  label={communication.priority}
                   tone={priorityTone(
-                    comm.priority
+                    communication.priority
                   )}
                 />
               </div>
@@ -429,10 +340,9 @@ export function CommunicationDetail() {
                 <dt className="text-[var(--color-ink-400)]">
                   Received
                 </dt>
-
                 <dd className="text-[var(--color-ink-900)]">
                   {formatDateTime(
-                    comm.receivedAt
+                    communication.receivedAt
                   )}
                 </dd>
               </div>
@@ -441,11 +351,10 @@ export function CommunicationDetail() {
                 <dt className="text-[var(--color-ink-400)]">
                   Responded
                 </dt>
-
                 <dd className="text-[var(--color-ink-900)]">
-                  {comm.respondedAt
+                  {communication.respondedAt
                     ? formatDateTime(
-                        comm.respondedAt
+                        communication.respondedAt
                       )
                     : "—"}
                 </dd>
@@ -455,10 +364,8 @@ export function CommunicationDetail() {
                 <dt className="text-[var(--color-ink-400)]">
                   Owner
                 </dt>
-
                 <dd className="text-[var(--color-ink-900)]">
-                  {displayName ||
-                    "Current user"}
+                  {displayName || "Current user"}
                 </dd>
               </div>
 
@@ -466,15 +373,14 @@ export function CommunicationDetail() {
                 <dt className="text-[var(--color-ink-400)]">
                   Classification
                 </dt>
-
                 <dd className="capitalize text-[var(--color-ink-900)]">
-                  {comm.category}
+                  {communication.category}
                 </dd>
               </div>
             </dl>
 
             <div className="mt-4 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-sm text-[var(--color-ink-700)]">
-              {comm.bodyPreview}
+              {communication.bodyPreview}
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
@@ -482,7 +388,8 @@ export function CommunicationDetail() {
                 type="button"
                 onClick={() =>
                   pushToast(
-                    "Evidence action is not connected yet."
+                    "Evidence action is not connected yet.",
+                    "error"
                   )
                 }
                 className="rounded-md border border-[var(--color-line)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-700)] hover:bg-[var(--color-surface)]"
@@ -502,213 +409,179 @@ export function CommunicationDetail() {
 
               <button
                 type="button"
-                onClick={
-                  openCommitmentForm
-                }
-                className="rounded-md border border-[var(--color-line)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-700)] hover:bg-[var(--color-surface)]"
+                onClick={openCommitmentForm}
+                disabled={actionLoading}
+                className="rounded-md border border-[var(--color-line)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-700)] hover:bg-[var(--color-surface)] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Create Commitment
               </button>
 
               <button
                 type="button"
-                onClick={
-                  handleMarkComplete
+                onClick={() =>
+                  void handleMarkComplete()
                 }
-                disabled={
-                  actionSubmitting !==
-                    null ||
-                  comm.status ===
-                    "completed"
-                }
+                disabled={actionLoading}
                 className="rounded-md bg-[var(--color-blue-600)] px-3 py-1.5 text-xs font-medium text-white hover:bg-[var(--color-blue-500)] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {comm.status ===
-                "completed"
-                  ? "Completed"
-                  : actionSubmitting ===
-                    "complete"
-                  ? "Completing..."
+                {actionLoading
+                  ? "Working..."
                   : "Mark Complete"}
               </button>
 
               <button
                 type="button"
-                onClick={
-                  handleEscalate
+                onClick={() =>
+                  void handleEscalate()
                 }
-                disabled={
-                  actionSubmitting !==
-                  null
-                }
+                disabled={actionLoading}
                 className="rounded-md px-3 py-1.5 text-xs font-medium text-[var(--color-red-600)] hover:bg-[var(--color-red-100)] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {actionSubmitting ===
-                "escalate"
-                  ? "Escalating..."
-                  : "Escalate"}
+                Escalate
               </button>
             </div>
-          </Card>
 
-          {commitmentFormOpen && (
-            <Card>
-              <SectionHeader title="Create Commitment" />
+            {commitmentFormOpen && (
+              <div className="mt-5 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] p-4">
+                <div className="mb-4">
+                  <h3 className="text-sm font-semibold text-[var(--color-ink-900)]">
+                    Create Commitment
+                  </h3>
 
-              <div className="mt-4 space-y-4">
-                <div>
-                  <label
-                    htmlFor="commitment-title"
-                    className="mb-1.5 block text-xs font-medium text-[var(--color-ink-700)]"
-                  >
-                    Commitment title
-                  </label>
-
-                  <input
-                    id="commitment-title"
-                    type="text"
-                    value={
-                      commitmentTitle
-                    }
-                    onChange={(event) =>
-                      setCommitmentTitle(
-                        event.target.value
-                      )
-                    }
-                    disabled={
-                      commitmentSubmitting
-                    }
-                    className="w-full rounded-md border border-[var(--color-line)] bg-white px-3 py-2 text-sm text-[var(--color-ink-900)] outline-none focus:border-[var(--color-blue-600)] focus:ring-2 focus:ring-[var(--color-blue-600)]/10 disabled:opacity-60"
-                    placeholder="What are you committing to do?"
-                  />
+                  <p className="mt-1 text-xs text-[var(--color-ink-500)]">
+                    Record the follow-up action that
+                    needs to be completed.
+                  </p>
                 </div>
 
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-3">
                   <div>
-                    <label
-                      htmlFor="commitment-due-date"
-                      className="mb-1.5 block text-xs font-medium text-[var(--color-ink-700)]"
-                    >
-                      Due date
+                    <label className="mb-1 block text-xs font-medium text-[var(--color-ink-700)]">
+                      Commitment
                     </label>
 
                     <input
-                      id="commitment-due-date"
-                      type="date"
-                      value={
-                        commitmentDueDate
-                      }
-                      onChange={(event) =>
-                        setCommitmentDueDate(
-                          event.target.value
-                        )
-                      }
-                      disabled={
-                        commitmentSubmitting
-                      }
-                      className="w-full rounded-md border border-[var(--color-line)] bg-white px-3 py-2 text-sm text-[var(--color-ink-900)] outline-none focus:border-[var(--color-blue-600)] focus:ring-2 focus:ring-[var(--color-blue-600)]/10 disabled:opacity-60"
-                    />
-                  </div>
-
-                  <div>
-                    <label
-                      htmlFor="commitment-next-action"
-                      className="mb-1.5 block text-xs font-medium text-[var(--color-ink-700)]"
-                    >
-                      Next action
-                    </label>
-
-                    <input
-                      id="commitment-next-action"
                       type="text"
-                      value={
-                        commitmentNextAction
-                      }
+                      value={commitmentTitle}
                       onChange={(event) =>
-                        setCommitmentNextAction(
+                        setCommitmentTitle(
                           event.target.value
                         )
                       }
-                      disabled={
-                        commitmentSubmitting
-                      }
-                      className="w-full rounded-md border border-[var(--color-line)] bg-white px-3 py-2 text-sm text-[var(--color-ink-900)] outline-none focus:border-[var(--color-blue-600)] focus:ring-2 focus:ring-[var(--color-blue-600)]/10 disabled:opacity-60"
-                      placeholder="What is the next action?"
+                      className="w-full rounded-md border border-[var(--color-line)] bg-white px-3 py-2 text-sm outline-none focus:border-[var(--color-blue-600)] focus:ring-2 focus:ring-[var(--color-blue-100)]"
+                      placeholder="What needs to be done?"
                     />
                   </div>
-                </div>
 
-                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                  <button
-                    type="button"
-                    onClick={
-                      closeCommitmentForm
-                    }
-                    disabled={
-                      commitmentSubmitting
-                    }
-                    className="rounded-md border border-[var(--color-line)] px-3 py-2 text-sm font-medium text-[var(--color-ink-700)] hover:bg-[var(--color-surface)] disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Cancel
-                  </button>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-[var(--color-ink-700)]">
+                        Due date
+                      </label>
 
-                  <button
-                    type="button"
-                    onClick={
-                      handleCreateCommitment
-                    }
-                    disabled={
-                      commitmentSubmitting
-                    }
-                    className="rounded-md bg-[var(--color-blue-600)] px-3 py-2 text-sm font-medium text-white hover:bg-[var(--color-blue-500)] disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {commitmentSubmitting
-                      ? "Creating..."
-                      : "Create commitment"}
-                  </button>
+                      <input
+                        type="date"
+                        value={commitmentDueDate}
+                        onChange={(event) =>
+                          setCommitmentDueDate(
+                            event.target.value
+                          )
+                        }
+                        className="w-full rounded-md border border-[var(--color-line)] bg-white px-3 py-2 text-sm outline-none focus:border-[var(--color-blue-600)] focus:ring-2 focus:ring-[var(--color-blue-100)]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-[var(--color-ink-700)]">
+                        Next step
+                      </label>
+
+                      <input
+                        type="text"
+                        value={commitmentNextStep}
+                        onChange={(event) =>
+                          setCommitmentNextStep(
+                            event.target.value
+                          )
+                        }
+                        className="w-full rounded-md border border-[var(--color-line)] bg-white px-3 py-2 text-sm outline-none focus:border-[var(--color-blue-600)] focus:ring-2 focus:ring-[var(--color-blue-100)]"
+                        placeholder="What happens next?"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                    <button
+                      type="button"
+                      onClick={closeCommitmentForm}
+                      disabled={actionLoading}
+                      className="rounded-md border border-[var(--color-line)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-700)] hover:bg-white disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void handleCreateCommitment()
+                      }
+                      disabled={actionLoading}
+                      className="rounded-md bg-[var(--color-blue-600)] px-3 py-1.5 text-xs font-medium text-white hover:bg-[var(--color-blue-500)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {actionLoading
+                        ? "Creating..."
+                        : "Save Commitment"}
+                    </button>
+                  </div>
                 </div>
               </div>
-            </Card>
-          )}          {createdCommitment && (
-            <Card>
-              <SectionHeader title="Created Commitment" />
+            )}
 
-              <div className="mt-3">
-                <CommitmentCard
-                  commitment={
-                    createdCommitment
-                  }
-                />
+            {createdCommitment && (
+              <div className="mt-4 rounded-md border border-[var(--color-line)] bg-[var(--color-blue-50)] p-3">
+                <p className="text-xs font-semibold text-[var(--color-blue-600)]">
+                  Commitment created
+                </p>
+
+                <p className="mt-1 text-sm font-medium text-[var(--color-ink-900)]">
+                  {createdCommitment.title}
+                </p>
+
+                <p className="mt-1 text-xs text-[var(--color-ink-500)]">
+                  {createdCommitment.dueDate
+                    ? `Due ${createdCommitment.dueDate}`
+                    : "No due date set"}
+                  {" · "}
+                  {createdCommitment.nextAction}
+                </p>
               </div>
-            </Card>
-          )}
+            )}
+          </Card>
 
           <Card>
             <SectionHeader title="Communication Timeline" />
-
             <Timeline
-              events={comm.timeline}
+              events={communication.timeline}
             />
           </Card>
         </div>
 
         <div className="space-y-5">
-          {comm.aiFinding && (
+          {communication.aiFinding && (
             <Card>
               <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <SectionHeader title="AI Analysis" />
 
                 <AIBadge
                   confidencePct={
-                    comm.aiFinding
+                    communication.aiFinding
                       .confidencePct
                   }
                   reasoning={
-                    comm.aiFinding
-                      .reasoning
+                    communication.aiFinding.reasoning
                   }
                   reviewStatus={
-                    comm.aiFinding
+                    communication.aiFinding
                       .reviewStatus
                   }
                 />
@@ -718,7 +591,7 @@ export function CommunicationDetail() {
                 <Row
                   label="Response Required"
                   value={
-                    comm.aiFinding
+                    communication.aiFinding
                       .responseRequired
                       ? "Yes"
                       : "No"
@@ -728,36 +601,32 @@ export function CommunicationDetail() {
                 <Row
                   label="Priority"
                   value={
-                    comm.aiFinding
-                      .priority
+                    communication.aiFinding.priority
                   }
                 />
 
                 <Row
                   label="Ownership"
                   value={
-                    comm.aiFinding
-                      .ownership
+                    communication.aiFinding.ownership
                   }
                 />
 
                 <Row
                   label="Commitment Detected"
                   value={
-                    comm.aiFinding
+                    communication.aiFinding
                       .commitmentDetected
                       ? "Yes"
                       : "No"
                   }
                 />
 
-                {comm.aiFinding
-                  .dueDate && (
+                {communication.aiFinding.dueDate && (
                   <Row
                     label="Due Date"
                     value={new Date(
-                      comm.aiFinding
-                        .dueDate
+                      communication.aiFinding.dueDate
                     ).toLocaleDateString()}
                   />
                 )}
@@ -765,38 +634,35 @@ export function CommunicationDetail() {
                 <Row
                   label="Next Action"
                   value={
-                    comm.aiFinding
-                      .nextAction
+                    communication.aiFinding.nextAction
                   }
                 />
 
                 <Row
                   label="Communication Quality"
-                  value={`${comm.aiFinding.qualityScore}/100`}
+                  value={`${communication.aiFinding.qualityScore}/100`}
                 />
               </dl>
 
               <p className="mt-3 rounded-md bg-[var(--color-blue-50)] p-2.5 text-[11px] text-[var(--color-blue-600)]">
-                AI-assisted analysis —
-                human review required
-                before negative
-                performance action.
+                AI-assisted analysis — human review
+                required before negative performance
+                action.
               </p>
             </Card>
           )}
 
-          {comm.excluded && (
+          {communication.excluded && (
             <Card>
               <SectionHeader title="Exclusion Applied" />
 
               <p className="text-xs text-[var(--color-ink-700)]">
-                {comm.exclusionReason}
+                {communication.exclusionReason}
               </p>
 
               <p className="mt-2 text-[11px] text-[var(--color-ink-500)]">
-                Excluded communications
-                do not negatively affect
-                employee communication
+                Excluded communications do not
+                negatively affect employee communication
                 metrics.
               </p>
             </Card>
@@ -806,9 +672,7 @@ export function CommunicationDetail() {
 
       <ContextDrawer
         open={contextOpen}
-        onClose={() =>
-          setContextOpen(false)
-        }
+        onClose={() => setContextOpen(false)}
       />
     </AppShell>
   );

@@ -14,6 +14,7 @@ import {
   getEmployee,
   insights,
   evidenceEntries,
+  communications,
   alertsForOwner,
   commitmentsForOwner,
 } from "../mock/generator";
@@ -42,8 +43,7 @@ export function EmployeeDetail() {
     (insight) => insight.employeeId === employee.id
   );
 
-  const myAlerts = alertsForOwner(employee.id)
-    .slice(0, 2);
+  const myAlerts = alertsForOwner(employee.id).slice(0, 2);
 
   const myCommitments = commitmentsForOwner(employee.id)
     .filter(
@@ -52,12 +52,56 @@ export function EmployeeDetail() {
     )
     .slice(0, 2);
 
-  // Only show evidence belonging to the selected employee.
-  const myEvidence = evidenceEntries
-    .filter(
-      (evidence) =>
-        evidence.employeeId === employee.id
-    )
+  /*
+   * Evidence does not directly contain an employeeId.
+   *
+   * There are two evidence formats in this application:
+   *
+   * 1. Generated/mock evidence:
+   *    ev-gen-1, ev-gen-2, etc.
+   *    These correspond to communications.slice(0, 9).
+   *
+   * 2. Live backend evidence:
+   *    The evidence id is the communication id itself.
+   *
+   * This logic supports both formats.
+   */
+  const employeeEvidence = evidenceEntries
+    .filter((evidence) => {
+      // Live evidence uses the communication ID directly.
+      const directCommunication = communications.find(
+        (communication) =>
+          communication.id === evidence.id
+      );
+
+      if (directCommunication) {
+        return (
+          directCommunication.ownerId === employee.id
+        );
+      }
+
+      // Generated evidence uses ev-gen-N.
+      const generatedMatch = evidence.id.match(
+        /^ev-gen-(\d+)$/
+      );
+
+      if (generatedMatch) {
+        const index =
+          Number(generatedMatch[1]) - 1;
+
+        const generatedCommunication =
+          communications[index];
+
+        return (
+          generatedCommunication?.ownerId ===
+          employee.id
+        );
+      }
+
+      // Evidence without an associated communication
+      // cannot be safely attributed to this employee.
+      return false;
+    })
     .slice(0, 3);
 
   return (
@@ -218,8 +262,8 @@ export function EmployeeDetail() {
             <SectionHeader title="Recent Evidence" />
 
             <div className="space-y-3">
-              {myEvidence.length ? (
-                myEvidence.map((evidence) => (
+              {employeeEvidence.length ? (
+                employeeEvidence.map((evidence) => (
                   <EvidenceCard
                     key={evidence.id}
                     evidence={evidence}
