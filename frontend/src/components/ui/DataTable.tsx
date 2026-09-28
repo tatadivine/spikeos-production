@@ -26,21 +26,38 @@ export function DataTable<T>({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   const sorted = [...rows];
+
   if (sortKey) {
-    const col = columns.find((c) => c.key === sortKey);
+    const col = columns.find(
+      (column) => column.key === sortKey
+    );
+
     if (col?.sortValue) {
       sorted.sort((a, b) => {
         const av = col.sortValue!(a);
         const bv = col.sortValue!(b);
-        const cmp = av < bv ? -1 : av > bv ? 1 : 0;
-        return sortDir === "asc" ? cmp : -cmp;
+
+        const cmp =
+          av < bv
+            ? -1
+            : av > bv
+              ? 1
+              : 0;
+
+        return sortDir === "asc"
+          ? cmp
+          : -cmp;
       });
     }
   }
 
   function toggleSort(key: string) {
     if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      setSortDir((direction) =>
+        direction === "asc"
+          ? "desc"
+          : "asc"
+      );
     } else {
       setSortKey(key);
       setSortDir("desc");
@@ -49,58 +66,153 @@ export function DataTable<T>({
 
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-[var(--color-line)] py-14 text-center text-sm text-[var(--color-ink-500)]">
+      <div className="rounded-lg border border-dashed border-[var(--color-line)] py-10 text-center text-sm text-[var(--color-ink-500)] sm:py-14">
         {emptyMessage}
       </div>
     );
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-[var(--color-line)] bg-white">
-      <table className="w-full min-w-[720px] border-collapse text-sm">
-        <thead>
-          <tr className="border-b border-[var(--color-line)] bg-[var(--color-surface)]">
-            {columns.map((col) => (
-              <th
-                key={col.key}
-                style={{ width: col.width }}
-                className="px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-[var(--color-ink-500)]"
-              >
-                {col.sortValue ? (
-                  <button
-                    className="inline-flex items-center gap-1 hover:text-[var(--color-ink-900)]"
-                    onClick={() => toggleSort(col.key)}
-                  >
-                    {col.header}
-                    {sortKey === col.key &&
-                      (sortDir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
-                  </button>
-                ) : (
-                  col.header
-                )}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((row, i) => (
-            <tr
-              key={i}
-              onClick={() => onRowClick?.(row)}
-              className={clsx(
-                "border-b border-[var(--color-line)] last:border-0",
-                onRowClick && "cursor-pointer hover:bg-[var(--color-blue-50)] transition-colors"
-              )}
-            >
-              {columns.map((col) => (
-                <td key={col.key} className="px-4 py-2.5 text-[var(--color-ink-700)]">
-                  {col.render(row)}
-                </td>
+    <div className="rounded-lg border border-[var(--color-line)] bg-white">
+      {/* Desktop / tablet table */}
+      <div className="hidden overflow-x-auto md:block">
+        <table className="w-full min-w-[680px] border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-[var(--color-line)] bg-[var(--color-surface)]">
+              {columns.map((column) => (
+                <th
+                  key={column.key}
+                  style={{
+                    width: column.width,
+                  }}
+                  className="px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-[var(--color-ink-500)]"
+                >
+                  {column.sortValue ? (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 hover:text-[var(--color-ink-900)]"
+                      onClick={() =>
+                        toggleSort(column.key)
+                      }
+                    >
+                      {column.header}
+
+                      {sortKey === column.key &&
+                        (sortDir === "asc" ? (
+                          <ChevronUp size={12} />
+                        ) : (
+                          <ChevronDown size={12} />
+                        ))}
+                    </button>
+                  ) : (
+                    column.header
+                  )}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+
+          <tbody>
+            {sorted.map((row, index) => (
+              <tr
+                key={index}
+                onClick={() =>
+                  onRowClick?.(row)
+                }
+                className={clsx(
+                  "border-b border-[var(--color-line)] last:border-0",
+                  onRowClick &&
+                    "cursor-pointer transition-colors hover:bg-[var(--color-blue-50)]"
+                )}
+              >
+                {columns.map((column) => (
+                  <td
+                    key={column.key}
+                    className="px-4 py-2.5 text-[var(--color-ink-700)]"
+                  >
+                    {column.render(row)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Mobile card/list view */}
+      <div className="divide-y divide-[var(--color-line)] md:hidden">
+        {sorted.map((row, index) => (
+          <button
+            key={index}
+            type="button"
+            disabled={!onRowClick}
+            onClick={() =>
+              onRowClick?.(row)
+            }
+            className={clsx(
+              "block w-full px-4 py-4 text-left",
+              onRowClick &&
+                "cursor-pointer transition-colors hover:bg-[var(--color-blue-50)] active:bg-[var(--color-blue-50)]",
+              !onRowClick &&
+                "cursor-default"
+            )}
+          >
+            <div className="space-y-3">
+              {columns.map((column, columnIndex) => (
+                <div
+                  key={column.key}
+                  className={clsx(
+                    "min-w-0",
+                    columnIndex === 0 &&
+                      "pb-1"
+                  )}
+                >
+                  <div className="mb-1 flex items-center justify-between gap-3">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-ink-400)]">
+                      {column.header}
+                    </span>
+
+                    {column.sortValue && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleSort(column.key);
+                        }}
+                        className="flex shrink-0 items-center text-[var(--color-ink-400)] hover:text-[var(--color-ink-900)]"
+                        aria-label={`Sort by ${column.header}`}
+                      >
+                        {sortKey === column.key ? (
+                          sortDir === "asc" ? (
+                            <ChevronUp size={13} />
+                          ) : (
+                            <ChevronDown size={13} />
+                          )
+                        ) : (
+                          <ChevronDown
+                            size={13}
+                            className="opacity-40"
+                          />
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  <div
+                    className={clsx(
+                      "min-w-0 text-sm text-[var(--color-ink-700)]",
+                      columnIndex === 0 &&
+                        "font-medium text-[var(--color-ink-900)]"
+                    )}
+                  >
+                    {column.render(row)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

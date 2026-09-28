@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from typing import Any
 from supabase import create_client
 from app.core.config import settings
+from datetime import datetime, timezone
+
 
 _client = None
 
@@ -80,3 +82,67 @@ def mark_communication_answered(conversation_id: str, answered_at: str):
     answered=datetime.fromisoformat(answered_at.replace("Z","+00:00"))
     minutes=max(0,int((answered-received).total_seconds()/60))
     return client().table("communications").update({"answered_at":answered_at,"response_time_minutes":minutes,"lifecycle":"completed" if minutes <= int(row.get("sla_hours") or 48)*60 else "overdue","updated_at":datetime.now(timezone.utc).isoformat()}).eq("id",row["id"]).execute().data
+
+
+
+
+def mark_communication_completed(
+    communication_id: str,
+    answered_at: str,
+):
+    rows = (
+        client()
+        .table("communications")
+        .select("id,received_at,sla_hours")
+        .eq("id", communication_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    if not rows:
+        return None
+
+    row = rows[0]
+
+    received_at = row.get("received_at")
+
+    response_time_minutes = None
+
+    if received_at:
+        received = datetime.fromisoformat(
+            received_at.replace("Z", "+00:00")
+        )
+
+        answered = datetime.fromisoformat(
+            answered_at.replace("Z", "+00:00")
+        )
+
+        response_time_minutes = max(
+            0,
+            int(
+                (answered - received).total_seconds() / 60
+            ),
+        )
+
+    return (
+        client()
+        .table("communications")
+        .update(
+            {
+                "answered_at": answered_at,
+                "response_time_minutes": response_time_minutes,
+                "lifecycle": "completed",
+                "updated_at": datetime.now(
+                    timezone.utc
+                ).isoformat(),
+            }
+        )
+        .eq("id", communication_id)
+        .execute()
+        .data
+    )
+
+
+
