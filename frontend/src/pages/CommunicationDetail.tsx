@@ -50,6 +50,7 @@ function normalizeCommitment(
   if (status !== "completed" && dueDate) {
     const due = new Date(dueDate);
     const now = new Date();
+
     const diffDays =
       (due.getTime() - now.getTime()) /
       (1000 * 60 * 60 * 24);
@@ -86,6 +87,7 @@ function normalizeCommitment(
 export function CommunicationDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+
   const {
     displayName,
     employeeId,
@@ -113,6 +115,12 @@ export function CommunicationDetail() {
   const [actionLoading, setActionLoading] =
     useState(false);
 
+  /*
+   * Resolve the communication once at render time.
+   *
+   * The explicit guard below guarantees that everything
+   * after it is working with a real Communication object.
+   */
   const comm = id
     ? getCommunication(id)
     : undefined;
@@ -130,21 +138,35 @@ export function CommunicationDetail() {
     );
   }
 
-  // Keep the successful TypeScript narrowing available
-  // inside event handlers and other nested functions.
+  /*
+   * IMPORTANT:
+   * Use this narrowed constant everywhere below instead
+   * of referring to `comm` inside callbacks.
+   *
+   * This prevents Vercel/TypeScript from reporting:
+   * TS18048: 'comm' is possibly 'undefined'.
+   */
   const communication = comm;
 
   function openCommitmentForm() {
-    setCommitmentTitle(communication.subject);
-    setCommitmentDueDate("");
-    setCommitmentNextStep(
-      communication.nextStep || "Follow up with the contact"
+    setCommitmentTitle(
+      communication.subject
     );
+
+    setCommitmentDueDate("");
+
+    setCommitmentNextStep(
+      communication.nextStep ||
+        "Follow up with the contact"
+    );
+
     setCommitmentFormOpen(true);
   }
 
   function closeCommitmentForm() {
-    if (actionLoading) return;
+    if (actionLoading) {
+      return;
+    }
 
     setCommitmentFormOpen(false);
     setCommitmentTitle("");
@@ -168,11 +190,13 @@ export function CommunicationDetail() {
         title: commitmentTitle.trim(),
         source: "Outlook",
         owner_id: employeeId,
-        due_date: commitmentDueDate || null,
+        due_date:
+          commitmentDueDate || null,
         next_step:
           commitmentNextStep.trim() ||
           "Follow up with the contact",
-        communication_id: communication.id,
+        communication_id:
+          communication.id,
       };
 
       const result =
@@ -216,7 +240,9 @@ export function CommunicationDetail() {
   }
 
   async function handleMarkComplete() {
-    if (actionLoading) return;
+    if (actionLoading) {
+      return;
+    }
 
     setActionLoading(true);
 
@@ -250,7 +276,9 @@ export function CommunicationDetail() {
   }
 
   async function handleEscalate() {
-    if (actionLoading) return;
+    if (actionLoading) {
+      return;
+    }
 
     setActionLoading(true);
 
@@ -340,6 +368,7 @@ export function CommunicationDetail() {
                 <dt className="text-[var(--color-ink-400)]">
                   Received
                 </dt>
+
                 <dd className="text-[var(--color-ink-900)]">
                   {formatDateTime(
                     communication.receivedAt
@@ -351,6 +380,7 @@ export function CommunicationDetail() {
                 <dt className="text-[var(--color-ink-400)]">
                   Responded
                 </dt>
+
                 <dd className="text-[var(--color-ink-900)]">
                   {communication.respondedAt
                     ? formatDateTime(
@@ -364,6 +394,7 @@ export function CommunicationDetail() {
                 <dt className="text-[var(--color-ink-400)]">
                   Owner
                 </dt>
+
                 <dd className="text-[var(--color-ink-900)]">
                   {displayName || "Current user"}
                 </dd>
@@ -373,6 +404,7 @@ export function CommunicationDetail() {
                 <dt className="text-[var(--color-ink-400)]">
                   Classification
                 </dt>
+
                 <dd className="capitalize text-[var(--color-ink-900)]">
                   {communication.category}
                 </dd>
@@ -439,9 +471,7 @@ export function CommunicationDetail() {
               >
                 Escalate
               </button>
-            </div>
-
-            {commitmentFormOpen && (
+            </div>            {commitmentFormOpen && (
               <div className="mt-5 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] p-4">
                 <div className="mb-4">
                   <h3 className="text-sm font-semibold text-[var(--color-ink-900)]">
@@ -560,6 +590,7 @@ export function CommunicationDetail() {
 
           <Card>
             <SectionHeader title="Communication Timeline" />
+
             <Timeline
               events={communication.timeline}
             />
@@ -578,7 +609,8 @@ export function CommunicationDetail() {
                       .confidencePct
                   }
                   reasoning={
-                    communication.aiFinding.reasoning
+                    communication.aiFinding
+                      .reasoning
                   }
                   reviewStatus={
                     communication.aiFinding
@@ -672,7 +704,9 @@ export function CommunicationDetail() {
 
       <ContextDrawer
         open={contextOpen}
-        onClose={() => setContextOpen(false)}
+        onClose={() =>
+          setContextOpen(false)
+        }
       />
     </AppShell>
   );
