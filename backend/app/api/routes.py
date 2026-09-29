@@ -41,6 +41,14 @@ class Commitment(BaseModel):
     next_step: str | None = None
 
 
+class FollowUpReschedule(BaseModel):
+    due_date: str
+
+
+class FollowUpAssign(BaseModel):
+    employee_id: str
+
+
 class ContextRequest(BaseModel):
     message_id: str | None = None
     subject: str = ""
@@ -59,6 +67,61 @@ class AnalyzeRequest(BaseModel):
 
 class EscalateCommunicationRequest(BaseModel):
     reason: str | None = None
+
+
+def map_followup(followup: dict):
+    """
+    Convert the Supabase followups row into the frontend
+    FollowUp shape.
+
+    The database stores:
+      employee_id
+      contact
+      subject
+      due_date
+      status
+      last_activity_at
+
+    The frontend expects:
+      ownerId
+      dueDate
+      lastActivity
+    """
+
+    due_date = followup.get("due_date")
+    status = followup.get("status") or "open"
+
+    # Preserve completed/escalated statuses.
+    # For active follow-ups, derive the display status
+    # from the due date when possible.
+    if status not in {"completed", "escalated"} and due_date:
+        try:
+            due = datetime.fromisoformat(due_date)
+            today = datetime.now(timezone.utc).date()
+
+            if due.date() < today:
+                status = "overdue"
+            elif due.date() == today:
+                status = "due_today"
+            else:
+                status = "open"
+        except (ValueError, TypeError):
+            pass
+
+    return {
+        "id": followup.get("id"),
+        "contact": followup.get("contact") or "Unknown",
+        "subject": followup.get("subject") or "(No subject)",
+        "ownerId": followup.get("employee_id"),
+        "dueDate": due_date or "",
+        "status": status,
+        "lastActivity": followup.get("last_activity_at"),
+        "nextAction": (
+            "Complete"
+            if status in {"open", "overdue", "due_today"}
+            else "Completed"
+        ),
+    }
 
 
 async def _bootstrap(user: dict):
@@ -88,6 +151,7 @@ async def _bootstrap(user: dict):
 
     comms = repo.list_communications(owners)
     commitments = repo.list_commitments(owners)
+    followup_rows = repo.list_followups(owners)
     alerts = repo.list_alerts(owners)
 
     employees = [
@@ -128,6 +192,11 @@ async def _bootstrap(user: dict):
         for c in commitments
     ]
 
+    mapped_followups = [
+        map_followup(f)
+        for f in followup_rows
+    ]
+
     mapped_alerts = [
         {
             "id": a.get("id"),
@@ -155,15 +224,14 @@ async def _bootstrap(user: dict):
                     "Review communication",
                 )
             ),
-            "ownerId": a.get("owner_id"),
-        }
+        "ownerId": a.get("owner_id"),
+        "communicationId": (
+            a.get("communication_id")
+            or (a.get("details") or {}).get("communication_id")
+        ),
+    }
         for a in alerts
     ]
-
-    # Follow-ups are separate from commitments.
-    # The follow-up repository integration has not
-    # been implemented yet.
-    followups = []
 
     customer_map = {}
 
@@ -262,7 +330,7 @@ async def _bootstrap(user: dict):
         }
         for c in mapped_comms
     ]
-    
+
     return {
         "user": {
             "id": user["id"],
@@ -289,7 +357,7 @@ async def _bootstrap(user: dict):
         "employees": employees,
         "communications": mapped_comms,
         "commitments": mapped_commitments,
-        "followUps": followups,
+        "followUps": mapped_followups,
         "alerts": mapped_alerts,
         "customers": list(
             customer_map.values()
@@ -717,12 +785,289 @@ async def create_commitment(
     }
 
 
+
+
+
 @router.get("/alerts")
 async def alerts(
     user=Depends(get_current_user),
 ):
     data = await _bootstrap(user)
     return data["alerts"]
+
+
+@router.post("/alerts/{alert_id}/review")
+async def review_alert(
+    alert_id: str,
+    user=Depends(get_current_user),
+):
+    alert = repo.get_alert(alert_id)
+
+    if not alert:
+        raise HTTPException(
+            status_code=404,
+            detail="Alert not found",
+        )
+
+    owners = allowed_owner_ids(user["id"], user)
+
+    if alert.get("owner_id") not in owners:
+        raise HTTPException(
+            status_code=403,
+            detail="Not authorized to review this alert",
+        )
+
+    updated = repo.update_alert(
+        alert_id,
+        {
+            "status": "reviewed",
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+    if not updated:
+        raise HTTPException(
+            status_code=404,
+            detail="Alert not found",
+        )
+
+    repo.insert_audit(
+        actor_id=user["id"],
+        action="review_alert",
+        target_type="alert",
+        target_id=alert_id,
+    )
+
+    return updated[0]
+
+
+@router.post("/alerts/{alert_id}/dismiss")
+async def dismiss_alert(
+    alert_id: str,
+    user=Depends(get_current_user),
+):
+    alert = repo.get_alert(alert_id)
+
+    if not alert:
+        raise HTTPException(
+            status_code=404,
+            detail="Alert not found",
+        )
+
+    owners = allowed_owner_ids(user["id"], user)
+
+    if alert.get("owner_id") not in owners:
+        raise HTTPException(
+            status_code=403,
+            detail="Not authorized to dismiss this alert",
+        )
+
+    updated = repo.update_alert(
+        alert_id,
+        {
+            "status": "dismissed",
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+    if not updated:
+        raise HTTPException(
+            status_code=404,
+            detail="Alert not found",
+        )
+
+    repo.insert_audit(
+        actor_id=user["id"],
+        action="dismiss_alert",
+        target_type="alert",
+        target_id=alert_id,
+    )
+
+    return updated[0]
+
+
+@router.post("/alerts/{alert_id}/commitment")
+async def create_alert_commitment(
+    alert_id: str,
+    user=Depends(get_current_user),
+):
+    alert = repo.get_alert(alert_id)
+
+    if not alert:
+        raise HTTPException(
+            status_code=404,
+            detail="Alert not found",
+        )
+
+    owners = allowed_owner_ids(user["id"], user)
+
+    if alert.get("owner_id") not in owners:
+        raise HTTPException(
+            status_code=403,
+            detail="Not authorized to create a commitment from this alert",
+        )
+
+    details = alert.get("details") or {}
+    communication_id = alert.get("communication_id")
+
+    subject = (
+        details.get("subject")
+        or alert.get("title")
+        or "Follow up on alert"
+    )
+
+    commitment = repo.insert_commitment(
+        {
+            "owner_id": alert.get("owner_id") or user["id"],
+            "communication_id": communication_id,
+            "title": subject,
+            "due_date": datetime.now(timezone.utc).date().isoformat(),
+            "status": "active",
+            "next_step": details.get(
+                "action",
+                "Review and follow up on this alert",
+            ),
+        }
+    )
+
+    repo.insert_audit(
+        actor_id=user["id"],
+        action="create_commitment_from_alert",
+        target_type="alert",
+        target_id=alert_id,
+    )
+
+    return commitment
+
+
+
+
+
+
+@router.post("/alerts/{alert_id}/review")
+async def review_alert(
+    alert_id: str,
+    user=Depends(get_current_user),
+):
+    alert = repo.get_alert(alert_id)
+
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    owners = allowed_owner_ids(user["id"], user)
+
+    if alert.get("owner_id") not in owners:
+        raise HTTPException(status_code=403, detail="Not authorized to review this alert")
+
+    updated = repo.update_alert(
+        alert_id,
+        {
+            "status": "reviewed",
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    repo.insert_audit(
+        actor_id=user["id"],
+        action="review_alert",
+        target_type="alert",
+        target_id=alert_id,
+    )
+
+    return updated[0]
+
+
+@router.post("/alerts/{alert_id}/dismiss")
+async def dismiss_alert(
+    alert_id: str,
+    user=Depends(get_current_user),
+):
+    alert = repo.get_alert(alert_id)
+
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    owners = allowed_owner_ids(user["id"], user)
+
+    if alert.get("owner_id") not in owners:
+        raise HTTPException(status_code=403, detail="Not authorized to dismiss this alert")
+
+    updated = repo.update_alert(
+        alert_id,
+        {
+            "status": "dismissed",
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    repo.insert_audit(
+        actor_id=user["id"],
+        action="dismiss_alert",
+        target_type="alert",
+        target_id=alert_id,
+    )
+
+    return updated[0]
+
+
+@router.post("/alerts/{alert_id}/commitment")
+async def create_alert_commitment(
+    alert_id: str,
+    user=Depends(get_current_user),
+):
+    alert = repo.get_alert(alert_id)
+
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    owners = allowed_owner_ids(user["id"], user)
+
+    if alert.get("owner_id") not in owners:
+        raise HTTPException(
+            status_code=403,
+            detail="Not authorized to create a commitment from this alert",
+        )
+
+    details = alert.get("details") or {}
+    communication_id = alert.get("communication_id")
+
+    subject = (
+        details.get("subject")
+        or alert.get("title")
+        or "Follow up on alert"
+    )
+
+    commitment = repo.insert_commitment(
+        {
+            "owner_id": alert.get("owner_id") or user["id"],
+            "communication_id": communication_id,
+            "title": subject,
+            "due_date": datetime.now(timezone.utc).date().isoformat(),
+            "status": "active",
+            "next_step": details.get(
+                "action",
+                "Review and follow up on this alert",
+            ),
+        }
+    )
+
+    repo.insert_audit(
+        actor_id=user["id"],
+        action="create_commitment_from_alert",
+        target_type="alert",
+        target_id=alert_id,
+    )
+
+    return commitment
+
+
+
 
 
 @router.get("/communications")
@@ -928,6 +1273,267 @@ async def commitments(
     return (
         await _bootstrap(user)
     )["commitments"]
+
+
+# ============================================================
+# FOLLOW-UP ACTIONS
+# ============================================================
+
+@router.get("/followups")
+async def followups(
+    user=Depends(get_current_user),
+):
+    allowed_ids = allowed_owner_ids(
+        user["id"],
+        user,
+    )
+
+    rows = repo.list_followups(
+        allowed_ids
+    )
+
+    return [
+        map_followup(row)
+        for row in rows
+    ]
+
+
+@router.post(
+    "/followups/{followup_id}/complete"
+)
+async def complete_followup(
+    followup_id: str,
+    user=Depends(get_current_user),
+):
+    allowed_ids = allowed_owner_ids(
+        user["id"],
+        user,
+    )
+
+    followup = repo.get_followup(
+        followup_id
+    )
+
+    if not followup:
+        raise HTTPException(
+            status_code=404,
+            detail="Follow-up not found",
+        )
+
+    if followup.get("employee_id") not in allowed_ids:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "You are not authorized to "
+                "complete this follow-up"
+            ),
+        )
+
+    updated = repo.update_followup(
+        followup_id,
+        {
+            "status": "completed",
+            "last_activity_at": (
+                datetime.now(
+                    timezone.utc
+                ).isoformat()
+            ),
+        },
+    )
+
+    if not updated:
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to complete follow-up",
+        )
+
+    updated_row = (
+        updated[0]
+        if isinstance(updated, list)
+        else updated
+    )
+
+    repo.insert_audit(
+        user["id"],
+        "Completed follow-up",
+        "followup",
+        followup_id,
+        {
+            "employee_id": followup.get(
+                "employee_id"
+            ),
+        },
+    )
+
+    return {
+        "status": "completed",
+        "followUp": map_followup(
+            updated_row
+        ),
+    }
+
+
+@router.post(
+    "/followups/{followup_id}/reschedule"
+)
+async def reschedule_followup(
+    followup_id: str,
+    payload: FollowUpReschedule,
+    user=Depends(get_current_user),
+):
+    allowed_ids = allowed_owner_ids(
+        user["id"],
+        user,
+    )
+
+    followup = repo.get_followup(
+        followup_id
+    )
+
+    if not followup:
+        raise HTTPException(
+            status_code=404,
+            detail="Follow-up not found",
+        )
+
+    if followup.get("employee_id") not in allowed_ids:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "You are not authorized to "
+                "reschedule this follow-up"
+            ),
+        )
+
+    updated = repo.update_followup(
+        followup_id,
+        {
+            "due_date": payload.due_date,
+            "last_activity_at": (
+                datetime.now(
+                    timezone.utc
+                ).isoformat()
+            ),
+        },
+    )
+
+    if not updated:
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to reschedule follow-up",
+        )
+
+    updated_row = (
+        updated[0]
+        if isinstance(updated, list)
+        else updated
+    )
+
+    repo.insert_audit(
+        user["id"],
+        "Rescheduled follow-up",
+        "followup",
+        followup_id,
+        {
+            "old_due_date": followup.get(
+                "due_date"
+            ),
+            "new_due_date": payload.due_date,
+        },
+    )
+
+    return {
+        "status": "rescheduled",
+        "followUp": map_followup(
+            updated_row
+        ),
+    }
+
+
+@router.post(
+    "/followups/{followup_id}/assign"
+)
+async def assign_followup(
+    followup_id: str,
+    payload: FollowUpAssign,
+    user=Depends(get_current_user),
+):
+    allowed_ids = allowed_owner_ids(
+        user["id"],
+        user,
+    )
+
+    followup = repo.get_followup(
+        followup_id
+    )
+
+    if not followup:
+        raise HTTPException(
+            status_code=404,
+            detail="Follow-up not found",
+        )
+
+    if followup.get("employee_id") not in allowed_ids:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "You are not authorized to "
+                "assign this follow-up"
+            ),
+        )
+
+    if payload.employee_id not in allowed_ids:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "You cannot assign this follow-up "
+                "to that employee"
+            ),
+        )
+
+    updated = repo.update_followup(
+        followup_id,
+        {
+            "employee_id": payload.employee_id,
+            "last_activity_at": (
+                datetime.now(
+                    timezone.utc
+                ).isoformat()
+            ),
+        },
+    )
+
+    if not updated:
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to assign follow-up",
+        )
+
+    updated_row = (
+        updated[0]
+        if isinstance(updated, list)
+        else updated
+    )
+
+    repo.insert_audit(
+        user["id"],
+        "Assigned follow-up",
+        "followup",
+        followup_id,
+        {
+            "old_employee_id": followup.get(
+                "employee_id"
+            ),
+            "new_employee_id": payload.employee_id,
+        },
+    )
+
+    return {
+        "status": "assigned",
+        "followUp": map_followup(
+            updated_row
+        ),
+    }
 
 
 @router.get("/employees")

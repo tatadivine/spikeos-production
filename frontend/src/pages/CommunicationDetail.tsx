@@ -416,18 +416,19 @@ export function CommunicationDetail() {
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() =>
-                  pushToast(
-                    "Evidence action is not connected yet.",
-                    "error"
-                  )
-                }
-                className="rounded-md border border-[var(--color-line)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-700)] hover:bg-[var(--color-surface)]"
-              >
-                View Evidence
-              </button>
+              
+
+
+
+
+
+
+
+
+
+
+
+              
 
               <button
                 type="button"

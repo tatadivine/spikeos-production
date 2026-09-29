@@ -116,6 +116,8 @@ export type AlertCategory =
   | "ai_coaching"
   | "positive_indicator";
 
+
+
 export interface AlertItem {
   id: string;
   category: AlertCategory;
@@ -125,7 +127,10 @@ export interface AlertItem {
   reason: string;
   recommendedAction: string;
   ownerId: string;
+  communicationId: string | null;
 }
+
+
 
 export interface Customer {
   id: string;

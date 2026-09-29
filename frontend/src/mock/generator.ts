@@ -470,6 +470,7 @@ function buildAlertsFor(ownerId: string, n: number) {
       reason,
       recommendedAction: action,
       ownerId,
+      communicationId: null,
     });
   }
 }

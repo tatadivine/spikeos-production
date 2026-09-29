@@ -142,17 +142,27 @@ export function DataTable<T>({
       {/* Mobile card/list view */}
       <div className="divide-y divide-[var(--color-line)] md:hidden">
         {sorted.map((row, index) => (
-          <button
+          <div
             key={index}
-            type="button"
-            disabled={!onRowClick}
+            role={onRowClick ? "button" : undefined}
+            tabIndex={onRowClick ? 0 : undefined}
             onClick={() =>
               onRowClick?.(row)
             }
+            onKeyDown={(event) => {
+              if (
+                onRowClick &&
+                (event.key === "Enter" ||
+                  event.key === " ")
+              ) {
+                event.preventDefault();
+                onRowClick(row);
+              }
+            }}
             className={clsx(
               "block w-full px-4 py-4 text-left",
               onRowClick &&
-                "cursor-pointer transition-colors hover:bg-[var(--color-blue-50)] active:bg-[var(--color-blue-50)]",
+                "cursor-pointer transition-colors hover:bg-[var(--color-blue-50)] active:bg-[var(--color-blue-50)] focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--color-blue-500)]",
               !onRowClick &&
                 "cursor-default"
             )}
@@ -210,7 +220,7 @@ export function DataTable<T>({
                 </div>
               ))}
             </div>
-          </button>
+          </div>
         ))}
       </div>
     </div>
