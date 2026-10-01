@@ -56,6 +56,15 @@ class FollowUpAssign(BaseModel):
     employee_id: str
 
 
+class FollowUpCreate(BaseModel):
+    communication_id: str | None = None
+    employee_id: str | None = None
+    contact: str | None = None
+    subject: str | None = None
+    due_date: str | None = None
+    next_action: str | None = None
+
+
 class ContextRequest(BaseModel):
     message_id: str | None = None
     subject: str = ""
@@ -122,12 +131,21 @@ def map_followup(followup: dict):
         "ownerId": followup.get("employee_id"),
         "dueDate": due_date or "",
         "status": status,
-        "lastActivity": followup.get("last_activity_at"),
-        "nextAction": (
-            "Complete"
-            if status in {"open", "overdue", "due_today"}
-            else "Completed"
+        "lastActivity": (
+            followup.get("last_activity_at")
+            or followup.get("created_at")
         ),
+        "nextAction": (
+            followup.get("next_action")
+            or (
+                "Complete"
+                if status in {"open", "overdue", "due_today"}
+                else "Completed"
+            )
+        ),
+        "communicationId": followup.get("communication_id"),
+        "source": followup.get("source") or "manual",
+        "completedAt": followup.get("completed_at"),
     }
 
 
@@ -1238,6 +1256,117 @@ async def followups(
     ]
 
 
+@router.post("/followups")
+async def create_followup(
+    payload: FollowUpCreate,
+    user=Depends(get_current_user),
+):
+    allowed_ids = allowed_owner_ids(
+        user["id"],
+        user,
+    )
+
+    communication = None
+
+    if payload.communication_id:
+        communication = repo.get_communication(
+            payload.communication_id
+        )
+
+        if not communication:
+            raise HTTPException(
+                status_code=404,
+                detail="Communication not found",
+            )
+
+        if communication.get("owner_id") not in allowed_ids:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "You are not authorized to create a "
+                    "follow-up for this communication"
+                ),
+            )
+
+        # One open follow-up per communication.
+        existing = repo.get_open_followup_for_communication(
+            payload.communication_id
+        )
+
+        if existing:
+            return {
+                "status": "exists",
+                "followUp": map_followup(existing),
+            }
+
+    employee_id = (
+        payload.employee_id
+        or (communication or {}).get("owner_id")
+        or user["id"]
+    )
+
+    if employee_id not in allowed_ids:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "You cannot assign this follow-up "
+                "to that employee"
+            ),
+        )
+
+    subject = (
+        (payload.subject or "").strip()
+        or (communication or {}).get("subject")
+    )
+
+    if not subject:
+        raise HTTPException(
+            status_code=422,
+            detail="A subject is required",
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    row = repo.insert_followup(
+        {
+            "employee_id": employee_id,
+            "communication_id": payload.communication_id,
+            "contact": (
+                (payload.contact or "").strip()
+                or (communication or {}).get("sender_name")
+                or (communication or {}).get("sender_email")
+                or "Unknown"
+            ),
+            "subject": subject,
+            "due_date": payload.due_date or None,
+            "status": "open",
+            "source": "manual",
+            "next_action": (
+                (payload.next_action or "").strip()
+                or None
+            ),
+            "created_by": user["id"],
+            "last_activity_at": now,
+        }
+    )
+
+    repo.insert_audit(
+        user["id"],
+        "Created follow-up",
+        "followup",
+        (row or {}).get("id"),
+        {
+            "communication_id": payload.communication_id,
+            "employee_id": employee_id,
+        },
+    )
+
+    return {
+        "status": "created",
+        "followUp": map_followup(row or {}),
+    }
+
+
 @router.post(
     "/followups/{followup_id}/complete"
 )
@@ -1273,6 +1402,11 @@ async def complete_followup(
         followup_id,
         {
             "status": "completed",
+            "completed_at": (
+                datetime.now(
+                    timezone.utc
+                ).isoformat()
+            ),
             "last_activity_at": (
                 datetime.now(
                     timezone.utc

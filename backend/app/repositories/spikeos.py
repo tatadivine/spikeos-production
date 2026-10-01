@@ -287,6 +287,38 @@ def get_followup(followup_id: str):
     return rows[0] if rows else None
 
 
+def get_auto_followup(communication_id: str):
+    rows = (
+        client()
+        .table("followups")
+        .select("*")
+        .eq("communication_id", communication_id)
+        .eq("source", "auto")
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    return rows[0] if rows else None
+
+
+def get_open_followup_for_communication(communication_id: str):
+    rows = (
+        client()
+        .table("followups")
+        .select("*")
+        .eq("communication_id", communication_id)
+        .neq("status", "completed")
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    return rows[0] if rows else None
+
+
 def insert_followup(row: dict[str, Any]):
     return (
         client()

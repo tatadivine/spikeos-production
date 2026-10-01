@@ -275,6 +275,47 @@ export function CommunicationDetail() {
     }
   }
 
+  async function handleCreateFollowUp() {
+    if (actionLoading) {
+      return;
+    }
+
+    setActionLoading(true);
+
+    try {
+      const result = await api<{ status: string }>(
+        "/followups",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            communication_id: communication.id,
+          }),
+        }
+      );
+
+      pushToast(
+        result.status === "exists"
+          ? "An open follow-up already exists for this communication."
+          : "Follow-up created.",
+        "success"
+      );
+
+      await refreshCommunication();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to create follow-up.";
+
+      pushToast(
+        `Unable to create follow-up: ${message}`,
+        "error"
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   async function handleEscalate() {
     if (actionLoading) {
       return;
@@ -447,6 +488,17 @@ export function CommunicationDetail() {
                 className="rounded-md border border-[var(--color-line)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-700)] hover:bg-[var(--color-surface)] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Create Commitment
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  void handleCreateFollowUp()
+                }
+                disabled={actionLoading}
+                className="rounded-md border border-[var(--color-line)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-700)] hover:bg-[var(--color-surface)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Create Follow-up
               </button>
 
               <button

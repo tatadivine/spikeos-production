@@ -22,15 +22,15 @@ class GraphService:
     async def get_message(self, message_id: str):
         if not self.access_token or not message_id:
             return None
-        return await self._get(f"{GRAPH}/me/messages/{message_id}", {"$select": "id,subject,from,toRecipients,receivedDateTime,sentDateTime,bodyPreview,body,webLink,conversationId,isRead"})
+        return await self._get(f"{GRAPH}/me/messages/{message_id}", {"$select": "id,subject,from,toRecipients,receivedDateTime,sentDateTime,bodyPreview,body,webLink,conversationId,isRead,flag"})
 
     async def get_user_message(self, user_id: str, message_id: str):
         if not self.access_token or not message_id:
             return None
-        return await self._get(f"{GRAPH}/users/{user_id}/messages/{message_id}", {"$select": "id,subject,from,toRecipients,receivedDateTime,sentDateTime,bodyPreview,body,webLink,conversationId,isRead"})
+        return await self._get(f"{GRAPH}/users/{user_id}/messages/{message_id}", {"$select": "id,subject,from,toRecipients,receivedDateTime,sentDateTime,bodyPreview,body,webLink,conversationId,isRead,flag"})
 
     async def get_inbox_messages(self, top: int = 25):
-        return (await self._get(f"{GRAPH}/me/mailFolders/inbox/messages", {"$top": min(max(top, 1), 100), "$orderby": "receivedDateTime desc", "$select": "id,subject,from,receivedDateTime,bodyPreview,webLink,conversationId,isRead"})).get("value", [])
+        return (await self._get(f"{GRAPH}/me/mailFolders/inbox/messages", {"$top": min(max(top, 1), 100), "$orderby": "receivedDateTime desc", "$select": "id,subject,from,receivedDateTime,bodyPreview,webLink,conversationId,isRead,flag"})).get("value", [])
 
     async def get_users(self):
         data = await self._get(f"{GRAPH}/users", {"$top": 999, "$select": "id,displayName,mail,userPrincipalName,jobTitle,department,accountEnabled"})

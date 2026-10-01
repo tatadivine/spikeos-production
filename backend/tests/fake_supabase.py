@@ -51,6 +51,10 @@ class _Query:
         self.filters.append(lambda r: _get(r, col) == val)
         return self
 
+    def neq(self, col, val):
+        self.filters.append(lambda r: _get(r, col) != val)
+        return self
+
     def in_(self, col, vals):
         vals = set(vals)
         self.filters.append(lambda r: _get(r, col) in vals)

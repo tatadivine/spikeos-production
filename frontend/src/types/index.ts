@@ -107,6 +107,9 @@ export interface FollowUp {
   status: "open" | "overdue" | "due_today" | "completed" | "escalated";
   lastActivity: string;
   nextAction: string;
+  communicationId?: string | null;
+  source?: "auto" | "manual";
+  completedAt?: string | null;
 }
 
 export type AlertCategory =

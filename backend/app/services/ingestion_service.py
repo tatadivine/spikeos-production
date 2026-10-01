@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from app.repositories import spikeos as repo
 from app.services.intelligence import classify_message, response_status
 from app.services.graph_service import GraphService, AppGraphClient
+from app.services.followup_service import sync_flag_followup
 
 def normalize_message(message: dict, owner_id: str):
     sender = ((message.get("from") or {}).get("emailAddress") or {})
@@ -22,7 +23,9 @@ def normalize_message(message: dict, owner_id: str):
 
 async def ingest_selected_message(message: dict, owner_id: str):
     row = normalize_message(message, owner_id)
-    return repo.upsert_communication(row)
+    stored = repo.upsert_communication(row)
+    sync_flag_followup(message, stored)
+    return stored
 
 async def ingest_notification(user_id: str, message_id: str):
     profiles = repo.get_profile(user_id)
@@ -32,7 +35,9 @@ async def ingest_notification(user_id: str, message_id: str):
     message = await graph.get_user_message(user_id, message_id)
     if not message:
         return None
-    return repo.upsert_communication(normalize_message(message, user_id))
+    stored = repo.upsert_communication(normalize_message(message, user_id))
+    sync_flag_followup(message, stored)
+    return stored
 
 async def ingest_sent_notification(user_id: str, message_id: str):
     profile = repo.get_profile(user_id)
