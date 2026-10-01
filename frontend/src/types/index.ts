@@ -63,6 +63,7 @@ export interface Communication {
   excluded: boolean;
   exclusionReason?: string;
   webLink?: string | null;
+  slaHours?: number;
 }
 
 export interface TimelineEvent {

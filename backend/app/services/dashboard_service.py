@@ -48,7 +48,7 @@ def map_communication(c: dict, profile_map: dict):
       "id": c.get("id"), "contact": c.get("sender_name") or sender, "organization": c.get("organization") or sender.split("@")[-1],
       "category": c.get("category", "internal"), "subject": c.get("subject") or "(No subject)", "bodyPreview": c.get("body_preview") or "",
       "receivedAt": c.get("received_at"), "respondedAt": c.get("answered_at"), "responseTimeMinutes": c.get("response_time_minutes"),
-      "status": communication_status(c), "webLink": c.get("web_link"),
+      "status": communication_status(c), "webLink": c.get("web_link"), "slaHours": c.get("sla_hours") or 48,
       "priority": c.get("priority", "normal"), "ownerId": c.get("owner_id"), "nextStep": c.get("next_step") or "Review and respond",
       "qualityScore": c.get("quality_score") or 0, "aiFinding": None, "timeline": [], "excluded": c.get("excluded", False), "exclusionReason": c.get("exclusion_reason")
     }

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { getGraphAccessToken } from "./auth";
 import {
@@ -58,6 +58,12 @@ type InboxPayload = {
 const API = import.meta.env.VITE_API_BASE_URL || "/api/v1";
 const SPIKEOS_URL = import.meta.env.VITE_SPIKEOS_URL || "http://localhost:5173";
 
+// Cross-surface refresh: SpikeOS state lives in Supabase, so changes made on
+// the Dashboard appear here on the next fetch. Re-fetch while the pane is
+// visible, when it becomes visible again, and when the selected item changes.
+const POLL_MS = 60_000;
+const MIN_REFRESH_GAP_MS = 15_000;
+
 
 function formatAge(hours: number) {
   if (hours < 1) return "<1h";
@@ -101,7 +107,13 @@ function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
 
+  const lastLoad = useRef(0);
+  const inFlight = useRef(false);
+
   const load = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    lastLoad.current = Date.now();
     setRefreshing(true);
     try {
       const data = await loadInbox();
@@ -110,10 +122,30 @@ function App() {
     } catch (error) {
       setError(error instanceof Error ? error.message : "Unable to load live Outlook data");
     } finally {
+      inFlight.current = false;
       setLoading(false);
       setRefreshing(false);
     }
   };
+
+  const refreshIfStale = () => {
+    if (document.visibilityState === "visible" && Date.now() - lastLoad.current >= MIN_REFRESH_GAP_MS) {
+      void load();
+    }
+  };
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, POLL_MS);
+    document.addEventListener("visibilitychange", refreshIfStale);
+    window.addEventListener("focus", refreshIfStale);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshIfStale);
+      window.removeEventListener("focus", refreshIfStale);
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof Office === "undefined") {
@@ -137,6 +169,7 @@ function App() {
           }
           setView("summary");
           setSelected(null);
+          refreshIfStale();
         });
       } catch {
         // Older Outlook clients may not expose ItemChanged in this context.

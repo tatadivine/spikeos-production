@@ -140,6 +140,11 @@ export function SessionProvider({
               "[SpikeOS Auth] Existing session bootstrap failed:",
               bootstrapError
             );
+
+            pushToast(
+              "SpikeOS data could not be loaded. Refresh to try again.",
+              "error"
+            );
           }
         }
       } catch (error) {
@@ -262,10 +267,15 @@ export function SessionProvider({
         bootstrapError
       );
 
+      pushToast(
+        "SpikeOS data could not be loaded. Refresh to try again.",
+        "error"
+      );
+
       // DO NOT clear me.
       // The user is still authenticated.
     }
-  }, []);
+  }, [pushToast]);
 
   const switchDemoIdentity = useCallback(() => {
     pushToast(

@@ -186,12 +186,12 @@ function responseHours(
   );
 }
 
+// The SLA stored on the communication (24h customer/vendor, 48h internal)
+// is the same one the backend, Outlook, alerts and reviews use.
 function slaHours(
   communication: Communication
 ): number {
-  return communication.aiFinding?.priority === "critical"
-    ? 24
-    : DEFAULT_SLA_HOURS;
+  return communication.slaHours ?? DEFAULT_SLA_HOURS;
 }
 
 function isWithinSla(

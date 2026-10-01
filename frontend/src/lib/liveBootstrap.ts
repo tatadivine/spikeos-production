@@ -20,6 +20,28 @@ export type BootstrapPayload = {
   audit: typeof auditLog;
 };
 
+// The generator module seeds deterministic demo data at import time. The
+// production app only renders data returned by /bootstrap, so empty the
+// shared arrays up front: if /bootstrap fails, pages show empty/error
+// states instead of generated people and communications.
+export function clearLiveData() {
+  for (const list of [
+    employees, communications, commitments, followUps, alerts, customers,
+    insights, reviews, evidenceEntries, auditLog,
+  ] as unknown[][]) {
+    list.length = 0;
+  }
+  orgAggregate.headcount = 0;
+  orgAggregate.responseScore = 0;
+  orgAggregate.medianResponse = 0;
+  orgAggregate.slaCompliance = 0;
+  orgAggregate.overdue = 0;
+  orgAggregate.openCommitments = 0;
+  orgAggregate.positiveCommunication = 0;
+}
+
+clearLiveData();
+
 export async function loadLiveBootstrap(): Promise<BootstrapPayload> {
   const data = await api<BootstrapPayload>("/bootstrap");
   employees.splice(0, employees.length, ...(data.employees || []));
