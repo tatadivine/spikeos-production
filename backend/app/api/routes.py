@@ -458,6 +458,12 @@ async def outlook_context(
     return data
 
 
+
+
+
+
+
+
 @router.post("/outlook/inbox-summary")
 async def outlook_inbox_summary(
     payload: InboxRequest,
@@ -568,6 +574,55 @@ async def outlook_inbox_summary(
             }
         )
 
+    owners = allowed_owner_ids(
+        user["id"],
+        user,
+    )
+
+    profiles = repo.list_profiles()
+    profile = next(
+        (
+            p
+            for p in profiles
+            if p.get("id") == user["id"]
+        ),
+        {
+            "id": user["id"],
+            "email": user.get("email"),
+            "display_name": user.get("name"),
+            "role": "employee",
+        },
+    )
+
+    communications = repo.list_communications(
+        owners
+    )
+    commitments = repo.list_commitments(
+        owners
+    )
+    alerts = repo.list_alerts(
+        owners
+    )
+
+    employee_metrics = compute_employee(
+        profile,
+        [
+            c
+            for c in communications
+            if c.get("owner_id") == user["id"]
+        ],
+        [
+            c
+            for c in commitments
+            if c.get("owner_id") == user["id"]
+        ],
+        [
+            a
+            for a in alerts
+            if a.get("owner_id") == user["id"]
+        ],
+    )
+
     return {
         "mode": "live",
         "summary": {
@@ -603,30 +658,16 @@ async def outlook_inbox_summary(
                     == "excluded"
                 ]
             ),
-            "response_score": round(
-                100
-                - min(
-                    100,
-                    (
-                        len(
-                            [
-                                i
-                                for i in items
-                                if i["status"]
-                                == "overdue"
-                            ]
-                        )
-                        * 10
-                    ),
-                )
-            ),
+            "response_score": employee_metrics[
+                "responseScore"
+            ],
             "open_commitments": len(
                 [
                     c
-                    for c in repo.list_commitments(
-                        [user["id"]]
-                    )
-                    if c.get("status")
+                    for c in commitments
+                    if c.get("owner_id")
+                    == user["id"]
+                    and c.get("status")
                     != "completed"
                 ]
             ),
@@ -641,6 +682,11 @@ async def outlook_inbox_summary(
         },
         "messages": items,
     }
+
+
+
+
+
 
 
 @router.post("/outlook/graph-message")

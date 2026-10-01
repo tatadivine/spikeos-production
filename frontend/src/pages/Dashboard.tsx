@@ -4,10 +4,6 @@ import {
   CalendarCheck2,
   MessageCircleHeart,
   AlertTriangle,
-  Users,
-  Building2,
-  Crown,
-  ClipboardList,
 } from "lucide-react";
 
 import { AppShell } from "../components/layout/AppShell";
@@ -34,58 +30,807 @@ import {
   AlertsCard,
   type AlertRow,
 } from "../components/dashboard/AlertsCard";
-import { useSession } from "../lib/SessionContext";
-import { ALEX_ID } from "../services";
+
 import {
+  useSession,
+  type DateRange,
+} from "../lib/SessionContext";
+
+import {
+  communications,
+  commitments,
+  alerts,
   getEmployee,
-  orgAggregate,
 } from "../mock/generator";
-import type { Employee } from "../types";
+
+import type {
+  Employee,
+  Communication,
+} from "../types";
+
+const DEFAULT_SLA_HOURS = 48;
+
+interface PersonMetrics {
+  responseScore: number;
+  medianResponseMinutes: number;
+  answeredWithin24hPct: number;
+  positiveCommunicationPct: number;
+  overdueFollowUps: number;
+  openCommitments: number;
+  slaCompliancePct: number;
+}
+
+interface PersonView {
+  metrics: PersonMetrics;
+  trend: TrendWeek[];
+  review: ReviewPoint[];
+  commitmentRows: CommitmentRow[];
+  excluded: ExcludedMessage[];
+  qualityMeters: {
+  label: string;
+  sub: string;
+  pct: number;
+  color: string;
+}[];
+  evidence: EvidenceItem[];
+  alerts: AlertRow[];
+}
+
+function Legend() {
+  return (
+    <div className="flex flex-wrap items-center gap-3 text-[11px] text-[var(--color-ink-500)]">
+      <span className="flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full bg-[var(--color-blue-600)]" />
+        Within SLA
+      </span>
+
+      <span className="flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full bg-[var(--color-orange-500)]" />
+        Outside SLA
+      </span>
+    </div>
+  );
+}
+
+function median(values: number[]): number {
+  if (!values.length) return 0;
+
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+
+  if (sorted.length % 2 === 0) {
+    return (sorted[middle - 1] + sorted[middle]) / 2;
+  }
+
+  return sorted[middle];
+}
+
+function rangeLabel(range: DateRange): string {
+  switch (range) {
+    case "Last 7 Days":
+      return "7 days";
+
+    case "Last Quarter":
+      return "quarter";
+
+    case "Year to Date":
+      return "year to date";
+
+    case "Last 30 Days":
+    default:
+      return "30 days";
+  }
+}
+
+function getRangeStart(range: DateRange, now = new Date()): Date {
+  const start = new Date(now);
+
+  switch (range) {
+    case "Last 7 Days":
+      start.setDate(start.getDate() - 7);
+      break;
+
+    case "Last Quarter":
+      start.setMonth(start.getMonth() - 3);
+      break;
+
+    case "Year to Date":
+      start.setMonth(0, 1);
+      start.setHours(0, 0, 0, 0);
+      break;
+
+    case "Last 30 Days":
+    default:
+      start.setDate(start.getDate() - 30);
+      break;
+  }
+
+  return start;
+}
+
+function getRangeEnd(_range: DateRange, now = new Date()): Date {
+  return new Date(now);
+}
+
+function filterCommunications(
+  employeeId: string,
+  range: DateRange
+): Communication[] {
+  const start = getRangeStart(range);
+  const end = getRangeEnd(range);
+
+  return communications.filter((communication) => {
+    if (communication.ownerId !== employeeId) {
+      return false;
+    }
+
+    const received = new Date(communication.receivedAt);
+
+    return received >= start && received <= end;
+  });
+}
+
+function responseHours(
+  communication: Communication,
+  now = new Date()
+): number {
+  const received = new Date(communication.receivedAt);
+
+  const end = communication.respondedAt
+    ? new Date(communication.respondedAt)
+    : now;
+
+  return Math.max(
+    0,
+    (end.getTime() - received.getTime()) / 3_600_000
+  );
+}
+
+function slaHours(
+  communication: Communication
+): number {
+  return communication.aiFinding?.priority === "critical"
+    ? 24
+    : DEFAULT_SLA_HOURS;
+}
+
+function isWithinSla(
+  communication: Communication
+): boolean {
+  if (!communication.respondedAt) {
+    return false;
+  }
+
+  return (
+    responseHours(communication) <=
+    slaHours(communication)
+  );
+}
+
+function calculateMetrics(
+  employee: Employee,
+  records: Communication[]
+): PersonMetrics {
+  const relevant = records.filter(
+    (communication) => !communication.excluded
+  );
+
+  const completed = relevant.filter(
+    (communication) =>
+      Boolean(communication.respondedAt)
+  );
+
+  const responseTimes = completed.map(
+    (communication) =>
+      communication.responseTimeMinutes != null
+        ? communication.responseTimeMinutes / 60
+        : responseHours(communication)
+  );
+
+  const withinSla = completed.filter(
+    (communication) =>
+      isWithinSla(communication)
+  );
+
+  const overdue = relevant.filter(
+    (communication) =>
+      !communication.respondedAt &&
+      responseHours(communication) >
+        slaHours(communication)
+  );
+
+  const responseScore =
+    completed.length > 0
+      ? Math.round(
+          (withinSla.length /
+            completed.length) *
+            100
+        )
+      : 0;
+
+  const answeredWithin24hPct =
+    completed.length > 0
+      ? Math.round(
+          (completed.filter(
+            (communication) =>
+              responseHours(communication) <=
+              24
+          ).length /
+            completed.length) *
+            100
+        )
+      : 0;
+
+  const positiveCommunicationPct =
+    completed.length > 0
+      ? Math.round(
+          completed.reduce(
+            (sum, communication) =>
+              sum +
+              (communication.qualityScore || 0),
+            0
+          ) / completed.length
+        )
+      : 0;
+
+  const openCommitments =
+    commitments.filter(
+      (commitment) =>
+        commitment.ownerId === employee.id &&
+        commitment.status !== "completed"
+    ).length;
+
+  return {
+    responseScore,
+    medianResponseMinutes:
+      responseTimes.length > 0
+        ? Math.round(
+            median(responseTimes) * 60
+          )
+        : 0,
+    answeredWithin24hPct,
+    positiveCommunicationPct,
+    overdueFollowUps: overdue.length,
+    openCommitments,
+    slaCompliancePct: responseScore,
+  };
+}
+
+function buildTrendData(
+  records: Communication[],
+  range: DateRange
+): TrendWeek[] {
+  const now = new Date();
+  const start = getRangeStart(range, now);
+
+  const relevant = records.filter(
+    (communication) =>
+      !communication.excluded
+  );
+
+  const bucketCount =
+    range === "Last 7 Days"
+      ? 7
+      : range === "Last 30 Days"
+        ? 5
+        : range === "Last Quarter"
+          ? 13
+          : Math.max(
+              1,
+              Math.ceil(
+                (now.getTime() -
+                  start.getTime()) /
+                  (30 * 86_400_000)
+              )
+            );
+
+  const duration =
+    now.getTime() - start.getTime();
+
+  return Array.from(
+    { length: bucketCount },
+    (_, index) => {
+      const bucketStart = new Date(
+        start.getTime() +
+          (duration * index) /
+            bucketCount
+      );
+
+      const bucketEnd = new Date(
+        start.getTime() +
+          (duration * (index + 1)) /
+            bucketCount
+      );
+
+      const bucketRecords =
+        relevant.filter(
+          (communication) => {
+            const received = new Date(
+              communication.receivedAt
+            );
+
+            return (
+              received >= bucketStart &&
+              received <= bucketEnd
+            );
+          }
+        );
+
+      const completed =
+        bucketRecords.filter(
+          (communication) =>
+            Boolean(
+              communication.respondedAt
+            )
+        );
+
+      const withinSla =
+        completed.filter(
+          (communication) =>
+            isWithinSla(communication)
+        );
+
+      const employeeScore =
+        completed.length > 0
+          ? Math.round(
+              (withinSla.length /
+                completed.length) *
+                100
+            )
+          : 0;
+
+      const teamScore =
+        bucketRecords.length > 0
+          ? Math.round(
+              (completed.length /
+                bucketRecords.length) *
+                100
+            )
+          : 0;
+
+      let label: string;
+
+      if (range === "Last 7 Days") {
+        label =
+          bucketStart.toLocaleDateString(
+            "en-US",
+            { weekday: "short" }
+          );
+      } else if (
+        range === "Year to Date"
+      ) {
+        label =
+          bucketStart.toLocaleDateString(
+            "en-US",
+            { month: "short" }
+          );
+      } else {
+        label = `Week ${index + 1}`;
+      }
+
+      return {
+        label,
+        employee: employeeScore,
+        team: teamScore,
+      };
+    }
+  );
+}
+
+function buildReviewSummary(
+  metrics: PersonMetrics
+): ReviewPoint[] {
+  return [
+    {
+      title: "Response performance",
+      desc: `${metrics.responseScore}% of completed responses were within SLA.`,
+    },
+    {
+      title: "24-hour responsiveness",
+      desc: `${metrics.answeredWithin24hPct}% of completed responses were answered within 24 hours.`,
+    },
+    {
+      title: "Communication quality",
+      desc: `${metrics.positiveCommunicationPct}% positive communication quality based on available records.`,
+    },
+    {
+      title: "Follow-up attention",
+      desc: `${metrics.overdueFollowUps} overdue follow-up${metrics.overdueFollowUps === 1 ? "" : "s"} require attention.`,
+    },
+  ];
+}
+
+function buildCommitmentRows(
+  employeeId: string,
+  records: Communication[]
+): CommitmentRow[] {
+  const relevant = records.filter(
+    (communication) =>
+      !communication.excluded
+  );
+
+  const completed = relevant.filter(
+    (communication) =>
+      Boolean(communication.respondedAt)
+  );
+
+  const withinSla = completed.filter(
+    (communication) =>
+      isWithinSla(communication)
+  );
+
+  const overdue = relevant.filter(
+    (communication) =>
+      !communication.respondedAt &&
+      responseHours(communication) >
+        slaHours(communication)
+  );
+
+  const total = relevant.length;
+
+  const completionPct =
+    total > 0
+      ? Math.round(
+          (completed.length / total) * 100
+        )
+      : 0;
+
+  const commitmentItems =
+    commitments.filter(
+      (commitment) =>
+        commitment.ownerId === employeeId
+    );
+
+  const completedCommitments =
+    commitmentItems.filter(
+      (commitment) =>
+        commitment.status === "completed"
+    );
+
+  const overdueCommitments =
+    commitmentItems.filter(
+      (commitment) =>
+        commitment.status === "overdue"
+    );
+
+  const commitmentCompletionPct =
+    commitmentItems.length > 0
+      ? Math.round(
+          (completedCommitments.length /
+            commitmentItems.length) *
+            100
+        )
+      : 0;
+
+  return [
+    {
+      category: "All Responses",
+      icon: Send,
+      completionPct,
+      completed: completed.length,
+      total,
+      overdue: overdue.length,
+      trend: "flat",
+      bold: true,
+    },
+    {
+      category: "Within SLA",
+      icon: Clock3,
+      completionPct:
+        completed.length > 0
+          ? Math.round(
+              (withinSla.length /
+                completed.length) *
+                100
+            )
+          : 0,
+      completed: withinSla.length,
+      total: completed.length,
+      overdue: 0,
+      trend: "flat",
+    },
+    {
+      category: "Commitments",
+      icon: CalendarCheck2,
+      completionPct:
+        commitmentCompletionPct,
+      completed:
+        completedCommitments.length,
+      total: commitmentItems.length,
+      overdue:
+        overdueCommitments.length,
+      trend: "flat",
+    },
+    {
+      category: "Follow-ups",
+      icon: MessageCircleHeart,
+      completionPct:
+        overdue.length === 0 ? 100 : 0,
+      completed: 0,
+      total: overdue.length,
+      overdue: overdue.length,
+      trend: "flat",
+    },
+  ];
+}
+
+
+function buildQualityMeters(
+  records: Communication[]
+) {
+  const completed = records.filter(
+    (communication) =>
+      !communication.excluded &&
+      Boolean(communication.respondedAt)
+  );
+
+  const quality =
+    completed.length > 0
+      ? Math.round(
+          completed.reduce(
+            (sum, communication) =>
+              sum +
+              (communication.qualityScore || 0),
+            0
+          ) / completed.length
+        )
+      : 0;
+
+  const ownership =
+    completed.length > 0
+      ? Math.round(
+          (completed.filter(
+            (communication) =>
+              Boolean(communication.nextStep)
+          ).length /
+            completed.length) *
+            100
+        )
+      : 0;
+
+  return [
+    {
+      label: "Clarity",
+      sub: "Easy to understand",
+      pct: quality,
+      color: "#2F6BFF",
+    },
+    {
+      label: "Respect",
+      sub: "Professional tone",
+      pct: quality,
+      color: "#157A4A",
+    },
+    {
+      label: "Ownership",
+      sub: "Takes responsibility",
+      pct: ownership,
+      color: "#E8720C",
+    },
+    {
+      label: "Actionable Next Steps",
+      sub: "Includes next steps",
+      pct: ownership,
+      color: "#F6821F",
+    },
+  ];
+}
+
+function buildEvidenceItems(
+  records: Communication[]
+): EvidenceItem[] {
+  return records
+    .filter(
+      (communication) =>
+        !communication.excluded
+    )
+    .slice()
+    .sort(
+      (a, b) =>
+        new Date(b.receivedAt).getTime() -
+        new Date(a.receivedAt).getTime()
+    )
+    .slice(0, 6)
+    .map((communication) => {
+      const withinSla =
+        Boolean(communication.respondedAt) &&
+        isWithinSla(communication);
+
+      return {
+        id: communication.id,
+        title: communication.respondedAt
+          ? withinSla
+            ? "Timely response"
+            : "Delayed response"
+          : "Response still outstanding",
+        date: new Date(
+          communication.receivedAt
+        ).toLocaleDateString(),
+        quote:
+          communication.bodyPreview ||
+          communication.subject,
+        tag: communication.category,
+        positive: withinSla,
+        aiNote: communication.respondedAt
+          ? `Response time: ${Math.round(
+              responseHours(communication)
+            )} hours.`
+          : `No response recorded after ${Math.round(
+              responseHours(communication)
+            )} hours.`,
+      };
+    });
+}
+
+function buildAlerts(
+  records: Communication[]
+): AlertRow[] {
+  return records
+    .filter(
+      (communication) =>
+        !communication.excluded &&
+        !communication.respondedAt
+    )
+    .filter(
+      (communication) =>
+        responseHours(communication) >
+        slaHours(communication)
+    )
+    .sort(
+      (a, b) =>
+        responseHours(b) -
+        responseHours(a)
+    )
+    .slice(0, 5)
+    .map((communication) => {
+      const hours = Math.round(
+        responseHours(communication)
+      );
+
+      return {
+        id: communication.id,
+        severity:
+          communication.priority === "critical" ||
+          hours >= 72
+            ? "high"
+            : communication.priority === "high" ||
+                hours >= 48
+              ? "medium"
+              : "low",
+        title: "Response overdue",
+        subject: communication.subject,
+        from: communication.contact,
+        preview:
+          communication.bodyPreview ||
+          communication.subject,
+        meta:
+          hours >= 24
+            ? `${hours} hours overdue`
+            : "Overdue",
+        action: "Respond Now",
+      };
+    });
+}
+
+function buildExcluded(
+  records: Communication[]
+): ExcludedMessage[] {
+  return records
+    .filter(
+      (communication) =>
+        communication.excluded
+    )
+    .map((communication) => ({
+      subject: communication.subject,
+      from: communication.contact,
+      reason:
+        communication.exclusionReason ||
+        "Excluded from response metrics",
+    }));
+}
+
+function buildPersonView(
+  employee: Employee | undefined,
+  range: DateRange
+): PersonView {
+  if (!employee) {
+    return {
+      metrics: {
+        responseScore: 0,
+        medianResponseMinutes: 0,
+        answeredWithin24hPct: 0,
+        positiveCommunicationPct: 0,
+        overdueFollowUps: 0,
+        openCommitments: 0,
+        slaCompliancePct: 0,
+      },
+      trend: [],
+      review: [],
+      commitmentRows: [],
+      excluded: [],
+      qualityMeters: [],
+      evidence: [],
+      alerts: [],
+    };
+  }
+
+  const records = filterCommunications(
+    employee.id,
+    range
+  );
+
+  const metrics = calculateMetrics(
+    employee,
+    records
+  );
+
+  return {
+    metrics,
+
+    trend: buildTrendData(
+      records,
+      range
+    ),
+
+    review: buildReviewSummary(
+      metrics
+    ),
+
+    commitmentRows:
+      buildCommitmentRows(
+        employee.id,
+        records
+      ),
+
+    excluded:
+      buildExcluded(records),
+
+    qualityMeters:
+      buildQualityMeters(records),
+
+    evidence:
+      buildEvidenceItems(records),
+
+    alerts:
+      buildAlerts(records),
+  };
+}
 
 export function Dashboard() {
   const {
     employeeId,
     displayName,
+    dateRange,
   } = useSession();
 
-  /*
-   * Dashboard always represents the currently
-   * authenticated employee.
-   *
-   * Managers and administrators can open another
-   * employee's dashboard through:
-   *
-   * Team → Overview → Employee
-   *
-   * The old My View / Manager View switch has
-   * intentionally been removed.
-   */
-  const viewingEmployee = employeeId
-    ? getEmployee(employeeId)
-    : undefined;
+  const viewingEmployee =
+    employeeId
+      ? getEmployee(employeeId)
+      : undefined;
 
   const data = buildPersonView(
-    viewingEmployee
+    viewingEmployee,
+    dateRange
   );
 
   const firstName =
-    displayName.split(" ")[0] || displayName;
+    displayName?.split(" ")[0] ||
+    "there";
 
   return (
     <AppShell pageTitle="Communication Effectiveness">
-      {/* Page introduction */}
       <div className="mb-5">
         <h2 className="text-lg font-semibold text-[var(--color-ink-900)]">
           Good morning, {firstName}.
         </h2>
 
         <p className="mt-0.5 text-sm text-[var(--color-ink-500)]">
-          Your communication effectiveness overview
+          Your communication effectiveness
+          overview · {rangeLabel(dateRange)}
         </p>
       </div>
 
-      {/* Key metrics */}
-      <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5 lg:gap-4">
+      <div className="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-5">
         <MetricStatCard
           icon={Send}
           tone="blue"
@@ -94,7 +839,9 @@ export function Dashboard() {
           suffix="/ 100"
           trend="flat"
           trendLabel="Live"
-          progressPct={data.metrics.responseScore}
+          progressPct={
+            data.metrics.responseScore
+          }
           source="Microsoft 365 communication records"
         />
 
@@ -102,13 +849,20 @@ export function Dashboard() {
           icon={Clock3}
           tone="purple"
           label="Median Response"
-          value={data.metrics.medianHrs}
+          value={(
+            data.metrics
+              .medianResponseMinutes / 60
+          ).toFixed(1)}
           suffix="hrs"
           trend="flat"
           trendLabel="Live"
           progressPct={Math.max(
             0,
-            100 - data.metrics.medianHrs * 10
+            100 -
+              data.metrics
+                .medianResponseMinutes /
+                60 *
+                10
           )}
           source="Outlook response timestamps"
         />
@@ -117,11 +871,17 @@ export function Dashboard() {
           icon={CalendarCheck2}
           tone="green"
           label="Answered Within 24h"
-          value={data.metrics.answered24h}
+          value={
+            data.metrics
+              .answeredWithin24hPct
+          }
           suffix="%"
           trend="flat"
           trendLabel="Live"
-          progressPct={data.metrics.answered24h}
+          progressPct={
+            data.metrics
+              .answeredWithin24hPct
+          }
           source="Response SLA rule engine"
         />
 
@@ -129,48 +889,87 @@ export function Dashboard() {
           icon={MessageCircleHeart}
           tone="teal"
           label="Positive Communication"
-          value={data.metrics.positiveComm}
+          value={
+            data.metrics
+              .positiveCommunicationPct
+          }
           suffix="%"
           trend="flat"
           trendLabel="Live"
-          progressPct={data.metrics.positiveComm}
-          source="Communication quality model (AI-assisted)"
+          progressPct={
+            data.metrics
+              .positiveCommunicationPct
+          }
+          source="Communication quality model"
         />
 
         <MetricStatCard
           icon={AlertTriangle}
           tone="red"
           label="Overdue Follow-ups"
-          value={data.overdueOpen}
+          value={
+            data.metrics
+              .overdueFollowUps
+          }
           trend="flat"
           trendLabel="Live"
           progressPct={Math.min(
             100,
-            data.overdueOpen * 8
+            data.metrics
+              .overdueFollowUps * 10
           )}
-          source="Follow-up tracking engine"
+          source="Response tracking engine"
         />
       </div>
 
-      {/* Trend + performance review */}
-      <div className="mb-5 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="mb-5 grid grid-cols-1 gap-4 xl:grid-cols-[1fr_380px]">
         <ResponseTrendCard
-          data={data.trendData}
+          data={data.trend}
+          weeksAboveGoal={`${
+            data.trend.filter(
+              (item) =>
+                item.employee >= 90
+            ).length
+          } of ${data.trend.length} periods`}
         />
 
         <PerformanceReviewCard
-          {...data.reviewSummary}
+          overallLabel={
+            data.metrics.responseScore >= 90
+              ? "Strong"
+              : data.metrics.responseScore >= 70
+                ? "Solid"
+                : "Needs Attention"
+          }
+          deltaPoints={0}
+          filledDots={Math.max(
+            0,
+            Math.min(
+              7,
+              Math.round(
+                data.metrics.responseScore /
+                  100 *
+                  7
+              )
+            )
+          )}
+          strengths={data.review.slice(
+            0,
+            2
+          )}
+          coaching={data.review.slice(
+            2,
+            4
+          )}
         />
       </div>
 
-      {/* Alerts */}
       <div className="mb-5">
         <AlertsCard
           alerts={data.alerts}
         />
       </div>
 
-      {/* Commitments / quality / evidence */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <ResponseCommitmentsTable
           rows={data.commitmentRows}
@@ -182,546 +981,19 @@ export function Dashboard() {
         />
 
         <EvidenceCoachingCard
-          items={data.evidenceItems}
+          items={data.evidence}
         />
       </div>
 
-      {/* Data explanation */}
-      <div className="mt-5 flex flex-col gap-3 rounded-lg border border-[var(--color-line)] bg-white px-4 py-3 text-[11px] text-[var(--color-ink-500)] sm:flex-row sm:items-center sm:justify-between">
+      <div className="mt-5 flex flex-col gap-2 rounded-lg border border-[var(--color-line)] bg-white px-4 py-3 text-[11px] text-[var(--color-ink-500)] sm:flex-row sm:items-center sm:justify-between">
         <p>
-          Visible to employee and authorized management.
-          Review decisions require human validation.
+          Visible to employee and authorized
+          management. Review decisions require
+          human validation.
         </p>
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <Legend
-            color="var(--color-green-600)"
-            label="Measured fact"
-          />
-
-          <Legend
-            color="var(--color-purple-600)"
-            label="AI-assisted indicator"
-          />
-
-          <Legend
-            color="var(--color-amber-600)"
-            label="Needs attention"
-          />
-
-          <Legend
-            color="var(--color-red-600)"
-            label="Overdue risk"
-          />
-        </div>
+        <Legend />
       </div>
     </AppShell>
   );
-}
-
-function Legend({
-  color,
-  label,
-}: {
-  color: string;
-  label: string;
-}) {
-  return (
-    <span className="flex items-center gap-1.5">
-      <span
-        className="h-2 w-2 shrink-0 rounded-full"
-        style={{
-          background: color,
-        }}
-      />
-
-      {label}
-    </span>
-  );
-}
-
-interface PersonView {
-  metrics: {
-    responseScore: number;
-    medianHrs: number;
-    answered24h: number;
-    positiveComm: number;
-  };
-
-  overdueOpen: number;
-
-  trendData: TrendWeek[];
-
-  reviewSummary: {
-    overallLabel: string;
-    deltaPoints: number;
-    filledDots: number;
-    strengths: ReviewPoint[];
-    coaching: ReviewPoint[];
-  };
-
-  commitmentRows: CommitmentRow[];
-
-  qualityMeters: {
-    label: string;
-    sub: string;
-    pct: number;
-    color: string;
-  }[];
-
-  evidenceItems: EvidenceItem[];
-
-  alerts: AlertRow[];
-
-  excluded: ExcludedMessage[];
-}
-
-function buildPersonView(
-  employee: Employee | undefined
-): PersonView {
-  const isAlex =
-    employee?.id === ALEX_ID;
-
-  const metrics = employee
-    ? {
-        responseScore:
-          employee.responseScore,
-
-        medianHrs: +(
-          employee.medianResponseMinutes / 60
-        ).toFixed(1),
-
-        answered24h:
-          employee.answeredWithin24hPct,
-
-        positiveComm:
-          employee.positiveCommunicationPct,
-      }
-    : {
-        responseScore:
-          orgAggregate.responseScore,
-
-        medianHrs: +(
-          orgAggregate.medianResponse / 60
-        ).toFixed(1),
-
-        answered24h: 91,
-
-        positiveComm:
-          orgAggregate.positiveCommunication,
-      };
-
-  const overdueOpen =
-    employee?.overdueFollowUps ?? 7;
-
-  /*
-   * Current trend display.
-   *
-   * The historical data source will be connected
-   * during the later live-data cleanup.
-   */
-  const weeks = [
-    "Oct 5–11",
-    "Oct 12–18",
-    "Oct 19–25",
-    "Oct 26–Nov 1",
-  ];
-
-  const start = Math.max(
-    60,
-    metrics.responseScore - 14
-  );
-
-  const trendData: TrendWeek[] =
-    weeks.map((label, index) => {
-      const t =
-        index / (weeks.length - 1);
-
-      return {
-        label,
-
-        employee: Math.round(
-          start +
-            (metrics.responseScore -
-              start) *
-              t
-        ),
-
-        team: Math.round(
-          start -
-            4 +
-            (
-              metrics.responseScore -
-              5 -
-              (start - 4)
-            ) *
-              t
-        ),
-      };
-    });
-
-  const reviewSummary = isAlex
-    ? {
-        overallLabel: "Strong",
-
-        deltaPoints: 6,
-
-        filledDots: 6,
-
-        strengths: [
-          {
-            title: "Clear ownership",
-            desc: "Takes responsibility and follows through.",
-          },
-          {
-            title: "Respectful tone",
-            desc: "Professional and constructive.",
-          },
-          {
-            title: "Timely customer replies",
-            desc: "Keeps customers informed.",
-          },
-        ],
-
-        coaching: [
-          {
-            title: `${overdueOpen} overdue follow-ups`,
-            desc: "Require attention.",
-          },
-          {
-            title: "3 unclear next steps",
-            desc: "Add specific next actions.",
-          },
-        ],
-      }
-    : {
-        overallLabel: "Solid",
-
-        deltaPoints: 3,
-
-        filledDots: 5,
-
-        strengths: [
-          {
-            title: "Reliable response times",
-            desc: "Consistently answers within SLA.",
-          },
-          {
-            title: "Professional tone",
-            desc: "Communications read as clear and respectful.",
-          },
-        ],
-
-        coaching: [
-          {
-            title: `${overdueOpen} overdue follow-ups`,
-            desc: "Require attention.",
-          },
-          {
-            title: "Follow-up cadence",
-            desc: "A few threads could use a scheduled check-in.",
-          },
-        ],
-      };
-
-  const commitmentRows: CommitmentRow[] = [
-    {
-      category: "Customers",
-      icon: Users,
-      withinSlaPct: 95,
-      withinSlaNumerator: 58,
-      withinSlaDenominator: 61,
-      overdue: Math.min(
-        2,
-        overdueOpen
-      ),
-      trend: "up",
-    },
-
-    {
-      category: "Internal Team",
-      icon: Building2,
-      withinSlaPct: 90,
-      withinSlaNumerator: 27,
-      withinSlaDenominator: 30,
-      overdue: Math.max(
-        0,
-        overdueOpen - 2
-      ),
-      trend: "flat",
-    },
-
-    {
-      category: "Leadership",
-      icon: Crown,
-      withinSlaPct: 100,
-      withinSlaNumerator: 9,
-      withinSlaDenominator: 9,
-      overdue: 0,
-      trend: "flat",
-    },
-
-    {
-      category: "Total",
-      icon: Users,
-      withinSlaPct: 92,
-      withinSlaNumerator: 94,
-      withinSlaDenominator: 100,
-      overdue: overdueOpen,
-      trend: "up",
-      bold: true,
-    },
-  ];
-
-  const qualityMeters = [
-    {
-      label: "Clarity",
-      sub: "Easy to understand",
-      pct: 91,
-      color: "#2f6bff",
-    },
-
-    {
-      label: "Respect",
-      sub: "Professional tone",
-      pct: 96,
-      color: "#157a4a",
-    },
-
-    {
-      label: "Ownership",
-      sub: "Takes responsibility",
-      pct: 84,
-      color: "#e8720c",
-    },
-
-    {
-      label: "Actionable Next Steps",
-      sub: "Includes next steps",
-      pct: 78,
-      color: "#f6821f",
-    },
-  ];
-
-  const evidenceItems: EvidenceItem[] =
-    isAlex
-      ? [
-          {
-            id: "ev-1",
-            title: "Clear customer update",
-            date: "Oct 30, 2024",
-            quote:
-              "Provided detailed update to customer…",
-            tag: "Customer",
-            positive: true,
-          },
-
-          {
-            id: "ev-2",
-            title: "Constructive team feedback",
-            date: "Oct 28, 2024",
-            quote:
-              "Shared helpful context with team…",
-            tag: "Internal",
-            positive: true,
-          },
-
-          {
-            id: "ev-3",
-            title: "Took ownership",
-            date: "Oct 24, 2024",
-            quote:
-              "Owns issue and proposed solution…",
-            tag: "Project",
-            positive: true,
-          },
-
-          {
-            id: "ev-4",
-            title: "Delayed follow-up",
-            date: "Oct 22, 2024",
-            quote:
-              "Reply sent 4 days after commitment date…",
-            tag: "Customer",
-            positive: false,
-            aiNote:
-              "Flagged by response-time rule, not content review.",
-          },
-
-          {
-            id: "ev-5",
-            title: "Unclear next step",
-            date: "Oct 19, 2024",
-            quote:
-              "No specific action or owner stated…",
-            tag: "Internal",
-            positive: false,
-            aiNote:
-              "AI-assisted language read; confidence: medium.",
-          },
-
-          {
-            id: "ev-6",
-            title: "Missed acknowledgement",
-            date: "Oct 15, 2024",
-            quote:
-              "Vendor request had no reply logged…",
-            tag: "Vendor",
-            positive: false,
-            aiNote:
-              "Derived from committed-date vs. reply-date fields.",
-          },
-        ]
-      : [
-          {
-            id: "ev-1",
-            title: "Prompt customer reply",
-            date: "Oct 29, 2024",
-            quote:
-              "Responded within the hour with next steps…",
-            tag: "Customer",
-            positive: true,
-          },
-
-          {
-            id: "ev-2",
-            title: "Helpful internal note",
-            date: "Oct 26, 2024",
-            quote:
-              "Added useful context for the team…",
-            tag: "Internal",
-            positive: true,
-          },
-
-          {
-            id: "ev-3",
-            title: "Overdue vendor thread",
-            date: "Oct 21, 2024",
-            quote: `No reply logged for ${Math.max(
-              3,
-              overdueOpen
-            )} business days…`,
-            tag: "Vendor",
-            positive: false,
-            aiNote:
-              "Flagged by response-time rule, not content review.",
-          },
-        ];
-
-  const alerts: AlertRow[] =
-    isAlex
-      ? [
-          {
-            id: "a1",
-            severity: "high",
-            title: "Customer reply overdue",
-            subject:
-              "Delivery Schedule Confirmation",
-            from:
-              "operations@precision-mfg.com",
-            preview:
-              "Please confirm the delivery schedule outlined below for PO 77921...",
-            meta: "26 hours",
-            action: "Respond Now",
-          },
-
-          {
-            id: "a2",
-            severity: "high",
-            title:
-              "Vendor waiting for next step",
-            subject:
-              "RFQ Response Update",
-            from:
-              "supply.partner@steelworks.com",
-            preview:
-              "Following up on lead time adjustment for the hydraulic assembly RFQ...",
-            meta: "Due today",
-            action: "Add Commitment",
-          },
-
-          {
-            id: "a3",
-            severity: "low",
-            title:
-              "Internal request unanswered",
-            subject:
-              "Component Specification Review",
-            from:
-              "engineering.team@summit-eng.com",
-            preview:
-              "Can you review the updated spec sheet before Thursday's kickoff?",
-            meta: "18 hours",
-            action: "Review",
-          },
-        ]
-      : overdueOpen > 0
-        ? [
-            {
-              id: "gen-1",
-              severity:
-                overdueOpen > 5
-                  ? "high"
-                  : "low",
-              title:
-                "Customer reply overdue",
-              subject:
-                "Order status follow-up",
-              from:
-                "customer.contact@example.com",
-              preview:
-                "Checking in on the update you mentioned last week — any news?",
-              meta: `${overdueOpen} overdue`,
-              action: "Respond Now",
-            },
-          ]
-        : [];
-
-  const excluded: ExcludedMessage[] =
-    [
-      {
-        subject:
-          "System Maintenance Notice",
-        from:
-          "it.support@summit-eng.com",
-        reason:
-          "Automated / IT notification",
-      },
-
-      {
-        subject:
-          "Benefits Enrollment Reminder",
-        from:
-          "hr@summit-eng.com",
-        reason:
-          "Distribution list / no response expected",
-      },
-
-      {
-        subject:
-          "Out of Office: PTO Oct 14–18",
-        from: `${
-          (
-            employee?.name ??
-            "employee"
-          )
-            .split(" ")[0]
-            .toLowerCase()
-        }@summit-eng.com`,
-        reason:
-          "Approved PTO — auto-reply",
-      },
-    ];
-
-  return {
-    metrics,
-    overdueOpen,
-    trendData,
-    reviewSummary,
-    commitmentRows,
-    qualityMeters,
-    evidenceItems,
-    alerts,
-    excluded,
-  };
 }

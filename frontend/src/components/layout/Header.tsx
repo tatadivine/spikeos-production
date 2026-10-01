@@ -12,7 +12,10 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useSession } from "../../lib/SessionContext";
+import {
+  useSession,
+  type DateRange,
+} from "../../lib/SessionContext";
 import { alertsForOwner } from "../../mock/generator";
 import { ALEX_ID } from "../../services";
 import { Modal } from "../ui/Modal";
@@ -20,7 +23,7 @@ import { HowSpikeOSWorks } from "./HowSpikeOSWorks";
 import { ACCOUNT_TYPE_LABELS } from "../../lib/auth";
 import clsx from "clsx";
 
-const RANGE_OPTIONS = [
+const RANGE_OPTIONS: DateRange[] = [
   "Last 7 Days",
   "Last 30 Days",
   "Last Quarter",
@@ -41,9 +44,10 @@ export function Header({
     setTourOpen,
     pushToast,
     signOut,
+    dateRange,
+    setDateRange,
   } = useSession();
 
-  const [range, setRange] = useState("Last 30 Days");
   const [rangeOpen, setRangeOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [howOpen, setHowOpen] = useState(false);
@@ -139,7 +143,7 @@ export function Header({
             <Calendar size={13} />
 
             <span className="hidden md:inline">
-              {range}
+              {dateRange}
             </span>
 
             <span className="md:hidden">
@@ -156,12 +160,12 @@ export function Header({
                   type="button"
                   key={option}
                   onClick={() => {
-                    setRange(option);
+                    setDateRange(option);
                     setRangeOpen(false);
                   }}
                   className={clsx(
                     "block w-full px-3 py-2 text-left text-xs hover:bg-[var(--color-surface)]",
-                    option === range
+                    option === dateRange
                       ? "font-semibold text-[var(--color-blue-600)]"
                       : "text-[var(--color-ink-700)]"
                   )}

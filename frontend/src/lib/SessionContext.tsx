@@ -24,6 +24,12 @@ interface Toast {
 
 export type ViewMode = "my" | "manager";
 
+export type DateRange =
+  | "Last 7 Days"
+  | "Last 30 Days"
+  | "Last Quarter"
+  | "Year to Date";
+
 interface Me {
   id: string;
   displayName: string;
@@ -49,6 +55,10 @@ interface SessionContextValue {
   canUseManagerView: boolean;
   viewMode: ViewMode;
   setViewMode: (v: ViewMode) => void;
+
+  dateRange: DateRange;
+  setDateRange: (range: DateRange) => void;
+
   toasts: Toast[];
   pushToast: (message: string, tone?: Toast["tone"]) => void;
   tourOpen: boolean;
@@ -77,6 +87,9 @@ export function SessionProvider({
 
   const [viewMode, setViewModeState] =
     useState<ViewMode>("my");
+
+  const [dateRange, setDateRange] =
+    useState<DateRange>("Last 30 Days");
 
   /*
    * Restore an existing Microsoft session.
@@ -309,6 +322,7 @@ export function SessionProvider({
 
     setMe(null);
     setViewModeState("my");
+    setDateRange("Last 30 Days");
 
     window.location.hash = "#/";
   }, []);
@@ -345,6 +359,10 @@ export function SessionProvider({
 
       setViewMode,
 
+      dateRange,
+
+      setDateRange,
+
       toasts,
 
       pushToast,
@@ -363,6 +381,7 @@ export function SessionProvider({
       privileges,
       canUseManagerView,
       viewMode,
+      dateRange,
       toasts,
       pushToast,
       tourOpen,
@@ -392,4 +411,3 @@ export function useSession() {
 
   return ctx;
 }
-

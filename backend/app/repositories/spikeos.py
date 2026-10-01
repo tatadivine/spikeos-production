@@ -64,10 +64,43 @@ def get_profile(profile_id: str):
 
 
 def upsert_communication(row: dict[str, Any]):
+    existing_rows = (
+        client()
+        .table("communications")
+        .select(
+            "id,answered_at,response_time_minutes,lifecycle"
+        )
+        .eq(
+            "external_message_id",
+            row.get("external_message_id"),
+        )
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    if existing_rows:
+        existing = existing_rows[0]
+
+        # Supabase is the source of truth for a communication
+        # that has already been completed from the Dashboard.
+        if existing.get("answered_at"):
+            row["answered_at"] = existing["answered_at"]
+            row["response_time_minutes"] = existing.get(
+                "response_time_minutes"
+            )
+
+            if existing.get("lifecycle") == "completed":
+                row["lifecycle"] = "completed"
+
     return (
         client()
         .table("communications")
-        .upsert(row, on_conflict="external_message_id")
+        .upsert(
+            row,
+            on_conflict="external_message_id",
+        )
         .execute()
         .data
         or [None]
