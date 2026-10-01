@@ -346,6 +346,41 @@ def update_followup(
 
 
 # ---------------------------------------------------------------------------
+# Coaching feedback
+# ---------------------------------------------------------------------------
+
+def list_coaching_feedback(employee_ids: list[str]):
+    if not employee_ids:
+        return []
+
+    try:
+        return (
+            client()
+            .table("coaching_feedback")
+            .select("*")
+            .in_("employee_id", employee_ids)
+            .order("created_at")
+            .execute()
+            .data
+            or []
+        )
+    except Exception:
+        # Table not migrated yet (005_coaching_reviews.sql); coaching still renders.
+        return []
+
+
+def insert_coaching_feedback(row: dict[str, Any]):
+    return (
+        client()
+        .table("coaching_feedback")
+        .insert(row)
+        .execute()
+        .data
+        or [None]
+    )[0]
+
+
+# ---------------------------------------------------------------------------
 # Reviews
 # ---------------------------------------------------------------------------
 

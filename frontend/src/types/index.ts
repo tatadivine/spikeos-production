@@ -192,4 +192,8 @@ export interface AIInsight {
   evidence: string;
   confidencePct: number;
   reviewStatus: "unreviewed" | "reviewed";
+  evidenceIds?: string[];
+  signature?: string;
+  basis?: "calculated" | "ai";
+  contextNotes?: { text: string; createdAt?: string | null; createdBy?: string | null }[];
 }

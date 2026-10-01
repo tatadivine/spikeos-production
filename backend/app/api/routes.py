@@ -31,6 +31,7 @@ from app.services.dashboard_service import (
 from app.services.openai_service import analyze_message
 from app.services.alert_service import map_alert, sync_overdue_alerts
 from app.services.evidence_service import build_evidence
+from app.services.coaching_service import COACHING_KINDS, apply_coaching_feedback, build_insights
 from app.services.powerbi_service import get_powerbi_embed_config
 
 
@@ -55,6 +56,11 @@ class FollowUpReschedule(BaseModel):
 
 class FollowUpAssign(BaseModel):
     employee_id: str
+
+
+class CoachingFeedback(BaseModel):
+    signature: str | None = None
+    context: str | None = None
 
 
 class FollowUpCreate(BaseModel):
@@ -275,28 +281,19 @@ async def _bootstrap(user: dict):
             )
         )
 
-    insights = [
-        {
-            "id": f"ins-{e['id']}",
-            "employeeId": e["id"],
-            "kind": "response",
-            "headline": (
-                f"{e['answeredWithin24hPct']}% "
-                "answered within 24 hours"
-            ),
-            "why": (
-                "Calculated from tracked "
-                "Microsoft 365 communications."
-            ),
-            "evidence": (
-                f"Response score "
-                f"{e['responseScore']}/100."
-            ),
-            "confidencePct": 100,
-            "reviewStatus": "reviewed",
-        }
-        for e in employees
-    ]
+    insights = apply_coaching_feedback(
+        [
+            insight
+            for e in employees
+            for insight in build_insights(
+                e,
+                [c for c in comms if c.get("owner_id") == e["id"]],
+                [f for f in mapped_followups if f.get("ownerId") == e["id"]],
+                [c for c in mapped_commitments if c.get("ownerId") == e["id"]],
+            )
+        ],
+        repo.list_coaching_feedback(owners),
+    )
 
     evidence = build_evidence(comms, profile_map)
 
@@ -1633,41 +1630,93 @@ async def evidence(
 async def coaching(
     user=Depends(get_current_user),
 ):
-    data = await _bootstrap(user)
+    return (
+        await _bootstrap(user)
+    )["insights"]
 
-    out = []
 
-    for e in data["employees"]:
-        if (
-            e["id"] != user["id"]
-            and user["id"]
-            not in data["ownerIds"]
-        ):
-            continue
+def _insight_employee(insight_id: str, user: dict) -> str:
+    kind, _, employee_id = insight_id.partition("-")
 
-        out.append(
-            {
-                "id": f"ins-{e['id']}",
-                "employeeId": e["id"],
-                "kind": "response",
-                "headline": (
-                    f"Response score: "
-                    f"{e['responseScore']}/100"
-                ),
-                "why": (
-                    "Calculated from tracked Microsoft 365 "
-                    "response times and SLA rules."
-                ),
-                "evidence": (
-                    f"{e['answeredWithin24hPct']}% "
-                    "answered within 24 hours."
-                ),
-                "confidencePct": 100,
-                "reviewStatus": "reviewed",
-            }
+    if kind not in COACHING_KINDS or not employee_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Coaching insight not found",
         )
 
-    return out
+    if employee_id not in allowed_owner_ids(user["id"], user):
+        raise HTTPException(
+            status_code=403,
+            detail="Not authorized for this employee's coaching",
+        )
+
+    return employee_id
+
+
+@router.post("/coaching/{insight_id}/dismiss")
+async def dismiss_coaching(
+    insight_id: str,
+    payload: CoachingFeedback,
+    user=Depends(get_current_user),
+):
+    employee_id = _insight_employee(insight_id, user)
+
+    row = repo.insert_coaching_feedback(
+        {
+            "insight_key": insight_id,
+            "employee_id": employee_id,
+            "action": "dismissed",
+            "signature": payload.signature,
+            "created_by": user["id"],
+        }
+    )
+
+    repo.insert_audit(
+        user["id"],
+        "Dismissed coaching insight",
+        "coaching",
+        insight_id,
+        {"signature": payload.signature},
+    )
+
+    return {"status": "dismissed", "feedback": row}
+
+
+@router.post("/coaching/{insight_id}/context")
+async def coaching_context(
+    insight_id: str,
+    payload: CoachingFeedback,
+    user=Depends(get_current_user),
+):
+    employee_id = _insight_employee(insight_id, user)
+    text = (payload.context or "").strip()
+
+    if not text:
+        raise HTTPException(
+            status_code=422,
+            detail="Context text is required",
+        )
+
+    row = repo.insert_coaching_feedback(
+        {
+            "insight_key": insight_id,
+            "employee_id": employee_id,
+            "action": "context",
+            "signature": payload.signature,
+            "context": text,
+            "created_by": user["id"],
+        }
+    )
+
+    repo.insert_audit(
+        user["id"],
+        "Added coaching context",
+        "coaching",
+        insight_id,
+        {},
+    )
+
+    return {"status": "saved", "feedback": row}
 
 
 @router.get("/reviews")
