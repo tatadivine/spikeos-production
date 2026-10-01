@@ -40,6 +40,7 @@ export function statusToTone(status: string): Tone {
     pending_review: "warning",
     pending: "warning",
     needs_context: "info",
+    incorrect: "neutral",
     open: "info",
     strong: "success",
     steady: "info",

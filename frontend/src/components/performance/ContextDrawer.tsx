@@ -1,18 +1,43 @@
 import { useState } from "react";
 import { Drawer } from "../ui/Modal";
 import { useSession } from "../../lib/SessionContext";
+import { api } from "../../lib/api";
 
 const CATEGORIES = ["PTO", "Delegation", "System issue", "Customer delay", "Wrong classification", "Workload", "Other"];
 
-export function ContextDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function ContextDrawer({
+  open,
+  onClose,
+  communicationId,
+}: {
+  open: boolean;
+  onClose: () => void;
+  communicationId?: string;
+}) {
   const { pushToast } = useSession();
   const [category, setCategory] = useState(CATEGORIES[0]);
   const [description, setDescription] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  function handleSubmit() {
-    setSubmitted(true);
-    pushToast("Context submitted for review.", "success");
+  async function handleSubmit() {
+    if (!communicationId) {
+      pushToast("This finding is not linked to a communication.", "error");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api(`/communications/${communicationId}/context`, {
+        method: "POST",
+        body: JSON.stringify({ category, description }),
+      });
+      setSubmitted(true);
+      pushToast("Context submitted for review.", "success");
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : "Unable to submit context.", "error");
+    } finally {
+      setSaving(false);
+    }
   }
 
   function handleClose() {
@@ -60,18 +85,12 @@ export function ContextDrawer({ open, onClose }: { open: boolean; onClose: () =>
               className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm"
             />
           </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-[var(--color-ink-700)]">
-              Attachment / supporting evidence
-            </label>
-            <div className="rounded-md border border-dashed border-[var(--color-line)] px-3 py-4 text-center text-xs text-[var(--color-ink-400)]">
-              Drop a file here or click to attach (demo placeholder)
-            </div>
-          </div>
           <div className="flex gap-2">
             <button
-              onClick={handleSubmit}
-              className="rounded-md bg-[var(--color-blue-600)] px-3 py-2 text-sm font-medium text-white hover:bg-[var(--color-blue-500)]"
+              type="button"
+              disabled={saving || !description.trim()}
+              onClick={() => void handleSubmit()}
+              className="rounded-md bg-[var(--color-blue-600)] px-3 py-2 text-sm font-medium text-white hover:bg-[var(--color-blue-500)] disabled:opacity-50"
             >
               Submit context
             </button>

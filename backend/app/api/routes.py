@@ -31,6 +31,7 @@ from app.services.dashboard_service import (
 from app.services.openai_service import analyze_message
 from app.services.alert_service import map_alert, sync_overdue_alerts
 from app.services.evidence_service import build_evidence
+from app.services.review_service import DECISIONS as REVIEW_DECISIONS, SLA_BREACH, build_reviews, sla_breach
 from app.services.coaching_service import COACHING_KINDS, apply_coaching_feedback, build_insights
 from app.services.powerbi_service import get_powerbi_embed_config
 
@@ -56,6 +57,16 @@ class FollowUpReschedule(BaseModel):
 
 class FollowUpAssign(BaseModel):
     employee_id: str
+
+
+class ReviewDecision(BaseModel):
+    decision: str
+    notes: str | None = None
+
+
+class CommunicationContext(BaseModel):
+    category: str | None = None
+    description: str
 
 
 class CoachingFeedback(BaseModel):
@@ -1719,42 +1730,193 @@ async def coaching_context(
     return {"status": "saved", "feedback": row}
 
 
-@router.get("/reviews")
-async def reviews(
-    user=Depends(get_current_user),
-):
+REVIEWER_ROLES = {
+    "manager",
+    "team_lead",
+    "administrator",
+    "hr",
+}
+
+
+def _require_reviewer(user: dict):
     if effective_role(
         user,
         repo.get_profile(user["id"]),
-    ) not in {
-        "manager",
-        "team_lead",
-        "administrator",
-        "hr",
-    }:
+    ) not in REVIEWER_ROLES:
         raise HTTPException(
             403,
             "Manager or authorized reviewer role required",
         )
 
-    owners = allowed_owner_ids(
-        user["id"],
-        user,
+
+@router.get("/reviews")
+async def reviews(
+    user=Depends(get_current_user),
+):
+    _require_reviewer(user)
+
+    owners = [
+        o
+        for o in allowed_owner_ids(user["id"], user)
+        if o != user["id"]  # no self-review
+    ]
+
+    comms = repo.list_communications(owners)
+    ids = [c["id"] for c in comms]
+
+    return build_reviews(
+        comms,
+        repo.list_reviews(ids),
+        repo.list_appeals(ids),
+        {p["id"]: p for p in repo.list_profiles()},
     )
 
-    allowed_comms = {
-        c["id"]
-        for c in repo.list_communications(
-            owners
+
+@router.post("/reviews/{communication_id}/decision")
+async def review_decision(
+    communication_id: str,
+    payload: ReviewDecision,
+    user=Depends(get_current_user),
+):
+    _require_reviewer(user)
+
+    if payload.decision not in REVIEW_DECISIONS:
+        raise HTTPException(
+            422,
+            "Unknown review decision",
         )
+
+    communication = repo.get_communication(communication_id)
+
+    if not communication:
+        raise HTTPException(
+            404,
+            "Communication not found",
+        )
+
+    owner_id = communication.get("owner_id")
+
+    if owner_id == user["id"]:
+        raise HTTPException(
+            403,
+            "You cannot review your own communication",
+        )
+
+    if owner_id not in allowed_owner_ids(user["id"], user):
+        raise HTTPException(
+            403,
+            "Employee is outside your authorized hierarchy",
+        )
+
+    detail = sla_breach(communication)
+    existing = repo.get_review(communication_id, SLA_BREACH)
+
+    if not detail and not existing:
+        raise HTTPException(
+            409,
+            "There is no review signal for this communication",
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    row = repo.save_review(
+        {
+            "communication_id": communication_id,
+            "finding_type": SLA_BREACH,
+            "employee_id": owner_id,
+            "finding": detail or (existing or {}).get("finding"),
+            "confidence": 1,
+            "evidence": [
+                {
+                    "communication_id": communication_id,
+                    "received_at": communication.get("received_at"),
+                    "answered_at": communication.get("answered_at"),
+                    "sla_hours": communication.get("sla_hours"),
+                }
+            ],
+            "requires_human_review": True,
+            "performance_record_write_allowed": False,
+            "human_review_status": payload.decision,
+            "notes": (payload.notes or "").strip() or None,
+            "reviewed_by": user["id"],
+            "reviewed_at": now,
+            "updated_at": now,
+        }
+    )
+
+    repo.insert_audit(
+        user["id"],
+        "Review decision",
+        "communication",
+        communication_id,
+        {
+            "decision": payload.decision,
+            "previous": (existing or {}).get("human_review_status"),
+        },
+    )
+
+    return {
+        "status": payload.decision,
+        "review": row,
     }
 
-    return [
-        r
-        for r in repo.list_reviews(owners)
-        if r.get("communication_id")
-        in allowed_comms
-    ]
+
+@router.post("/communications/{communication_id}/context")
+async def communication_context_note(
+    communication_id: str,
+    payload: CommunicationContext,
+    user=Depends(get_current_user),
+):
+    communication = repo.get_communication(communication_id)
+
+    if not communication:
+        raise HTTPException(
+            404,
+            "Communication not found",
+        )
+
+    if communication.get("owner_id") not in allowed_owner_ids(user["id"], user):
+        raise HTTPException(
+            403,
+            "Not authorized for this communication",
+        )
+
+    text = (payload.description or "").strip()
+
+    if not text:
+        raise HTTPException(
+            422,
+            "A description is required",
+        )
+
+    owner = repo.get_profile(communication.get("owner_id")) or {}
+
+    row = repo.insert_appeal(
+        {
+            "communication_id": communication_id,
+            "employee_id": communication.get("owner_id"),
+            "context": (
+                f"[{payload.category}] {text}"
+                if payload.category
+                else text
+            ),
+            "status": "pending",
+            "manager_id": owner.get("manager_id"),
+        }
+    )
+
+    repo.insert_audit(
+        user["id"],
+        "Submitted communication context",
+        "communication",
+        communication_id,
+        {"category": payload.category},
+    )
+
+    return {
+        "status": "submitted",
+        "appeal": row,
+    }
 
 
 @router.get("/audit")

@@ -756,6 +756,7 @@ export function CommunicationDetail() {
       </div>
 
       <ContextDrawer
+        communicationId={communication.id}
         open={contextOpen}
         onClose={() =>
           setContextOpen(false)

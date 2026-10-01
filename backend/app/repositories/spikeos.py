@@ -384,16 +384,89 @@ def insert_coaching_feedback(row: dict[str, Any]):
 # Reviews
 # ---------------------------------------------------------------------------
 
-def list_reviews(owner_ids: list[str], limit: int = 500):
-    return (
+def list_reviews(communication_ids: list[str]):
+    """ai_reviews rows for the given (already scope-checked) communications."""
+    rows: list[dict] = []
+    ids = list(communication_ids)
+    for i in range(0, len(ids), 100):
+        rows += (
+            client()
+            .table("ai_reviews")
+            .select("*")
+            .in_("communication_id", ids[i : i + 100])
+            .execute()
+            .data
+            or []
+        )
+    return rows
+
+
+def get_review(communication_id: str, finding_type: str):
+    rows = (
         client()
         .table("ai_reviews")
         .select("*")
-        .limit(limit)
+        .eq("communication_id", communication_id)
+        .eq("finding_type", finding_type)
+        .limit(1)
         .execute()
         .data
         or []
     )
+
+    return rows[0] if rows else None
+
+
+def save_review(row: dict[str, Any]):
+    existing = get_review(row["communication_id"], row["finding_type"])
+
+    if existing:
+        return (
+            client()
+            .table("ai_reviews")
+            .update(row)
+            .eq("id", existing["id"])
+            .execute()
+            .data
+            or [None]
+        )[0]
+
+    return (
+        client()
+        .table("ai_reviews")
+        .insert(row)
+        .execute()
+        .data
+        or [None]
+    )[0]
+
+
+def list_appeals(communication_ids: list[str]):
+    rows: list[dict] = []
+    ids = list(communication_ids)
+    for i in range(0, len(ids), 100):
+        rows += (
+            client()
+            .table("appeals")
+            .select("*")
+            .in_("communication_id", ids[i : i + 100])
+            .order("created_at")
+            .execute()
+            .data
+            or []
+        )
+    return rows
+
+
+def insert_appeal(row: dict[str, Any]):
+    return (
+        client()
+        .table("appeals")
+        .insert(row)
+        .execute()
+        .data
+        or [None]
+    )[0]
 
 
 # ---------------------------------------------------------------------------

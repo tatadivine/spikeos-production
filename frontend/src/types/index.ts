@@ -153,10 +153,14 @@ export interface Review {
   finding: string;
   evidence: string;
   aiConfidencePct: number;
-  status: "pending_review" | "confirmed" | "dismissed" | "needs_context";
+  status: "pending_review" | "confirmed" | "dismissed" | "needs_context" | "incorrect";
   reviewer: string | null;
   date: string;
   communicationId: string;
+  basis?: "calculated" | "ai";
+  reviewedAt?: string | null;
+  notes?: string | null;
+  employeeContext?: { text: string; createdAt?: string | null; status?: string | null }[];
 }
 
 export interface Evidence {
