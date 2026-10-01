@@ -168,6 +168,9 @@ export interface Evidence {
   evidenceText: string;
   context: string | null;
   result: "confirmed" | "excluded" | "under_review";
+  communicationId?: string | null;
+  employeeId?: string | null;
+  employeeName?: string | null;
 }
 
 export interface AuditEntry {

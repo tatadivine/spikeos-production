@@ -30,6 +30,7 @@ from app.services.dashboard_service import (
 )
 from app.services.openai_service import analyze_message
 from app.services.alert_service import map_alert, sync_overdue_alerts
+from app.services.evidence_service import build_evidence
 from app.services.powerbi_service import get_powerbi_embed_config
 
 
@@ -297,34 +298,7 @@ async def _bootstrap(user: dict):
         for e in employees
     ]
 
-    evidence = [
-        {
-            "id": c["id"],
-            "finding": (
-                "Communication response and "
-                "lifecycle evidence"
-            ),
-            "source": (
-                "Microsoft 365 — Outlook"
-            ),
-            "date": c["receivedAt"],
-            "rule": (
-                f"{c['category']} response target"
-            ),
-            "evidenceText": (
-                f"{c['subject']} — {c['status']}"
-            ),
-            "context": c.get(
-                "exclusionReason"
-            ),
-            "result": (
-                "excluded"
-                if c["excluded"]
-                else "confirmed"
-            ),
-        }
-        for c in mapped_comms
-    ]
+    evidence = build_evidence(comms, profile_map)
 
     return {
         "user": {
@@ -1650,35 +1624,9 @@ async def employee(
 async def evidence(
     user=Depends(get_current_user),
 ):
-    data = await _bootstrap(user)
-
-    return [
-        {
-            "id": c["id"],
-            "finding": (
-                "Response and lifecycle evidence"
-            ),
-            "source": (
-                "Microsoft 365 — Outlook"
-            ),
-            "date": c["receivedAt"],
-            "rule": (
-                f"{c['category']} response target"
-            ),
-            "evidenceText": (
-                f"{c['subject']} — status {c['status']}"
-            ),
-            "context": c.get(
-                "exclusionReason"
-            ),
-            "result": (
-                "excluded"
-                if c["excluded"]
-                else "confirmed"
-            ),
-        }
-        for c in data["communications"][:100]
-    ]
+    return (
+        await _bootstrap(user)
+    )["evidence"]
 
 
 @router.get("/coaching")
