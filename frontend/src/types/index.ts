@@ -62,6 +62,7 @@ export interface Communication {
   timeline: TimelineEvent[];
   excluded: boolean;
   exclusionReason?: string;
+  webLink?: string | null;
 }
 
 export interface TimelineEvent {

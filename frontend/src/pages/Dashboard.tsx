@@ -665,49 +665,54 @@ function buildEvidenceItems(
 function buildAlerts(
   records: Communication[]
 ): AlertRow[] {
-  return records
+  // Persisted Supabase alerts (open only) joined to the communications in
+  // range, so Dashboard actions operate on real alert ids.
+  const byCommunication = new Map(
+    records.map((communication) => [
+      communication.id,
+      communication,
+    ])
+  );
+
+  return alerts
     .filter(
-      (communication) =>
-        !communication.excluded &&
-        !communication.respondedAt
+      (alert) =>
+        alert.communicationId &&
+        byCommunication.has(alert.communicationId)
     )
-    .filter(
-      (communication) =>
-        responseHours(communication) >
-        slaHours(communication)
-    )
+    .map((alert) => ({
+      alert,
+      communication: byCommunication.get(
+        alert.communicationId as string
+      ) as Communication,
+    }))
     .sort(
       (a, b) =>
-        responseHours(b) -
-        responseHours(a)
+        responseHours(b.communication) -
+        responseHours(a.communication)
     )
     .slice(0, 5)
-    .map((communication) => {
+    .map(({ alert, communication }) => {
       const hours = Math.round(
         responseHours(communication)
       );
 
       return {
-        id: communication.id,
-        severity:
-          communication.priority === "critical" ||
-          hours >= 72
-            ? "high"
-            : communication.priority === "high" ||
-                hours >= 48
-              ? "medium"
-              : "low",
-        title: "Response overdue",
+        id: alert.id,
+        severity: alert.severity,
+        title: alert.reason,
         subject: communication.subject,
         from: communication.contact,
         preview:
           communication.bodyPreview ||
           communication.subject,
-        meta:
-          hours >= 24
+        meta: communication.respondedAt
+          ? "Response recorded"
+          : hours >= 24
             ? `${hours} hours overdue`
             : "Overdue",
         action: "Respond Now",
+        webLink: communication.webLink ?? null,
       };
     });
 }

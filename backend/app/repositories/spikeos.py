@@ -85,14 +85,14 @@ def upsert_communication(row: dict[str, Any]):
 
         # Supabase is the source of truth for a communication
         # that has already been completed from the Dashboard.
+        # An answered communication is always completed; this also
+        # repairs rows whose lifecycle an earlier re-ingest overwrote.
         if existing.get("answered_at"):
             row["answered_at"] = existing["answered_at"]
             row["response_time_minutes"] = existing.get(
                 "response_time_minutes"
             )
-
-            if existing.get("lifecycle") == "completed":
-                row["lifecycle"] = "completed"
+            row["lifecycle"] = "completed"
 
     return (
         client()
@@ -196,6 +196,23 @@ def list_alerts(owner_ids: list[str], limit: int = 500):
         .eq("status", "open")
         .order("created_at", desc=True)
         .limit(limit)
+        .execute()
+        .data
+        or []
+    )
+
+
+def list_alerts_by_kind(owner_ids: list[str], kind: str):
+    """All alerts of a given details.kind, in any status (used for de-duplication)."""
+    if not owner_ids:
+        return []
+
+    return (
+        client()
+        .table("alerts")
+        .select("id,communication_id,status,severity")
+        .in_("owner_id", owner_ids)
+        .eq("details->>kind", kind)
         .execute()
         .data
         or []
@@ -432,11 +449,10 @@ def mark_communication_answered(
             {
                 "answered_at": answered_at,
                 "response_time_minutes": minutes,
-                "lifecycle": (
-                    "completed"
-                    if minutes <= int(row.get("sla_hours") or 48) * 60
-                    else "overdue"
-                ),
+                # Answered is completed everywhere (same as the Dashboard
+                # complete action); SLA performance is measured from
+                # response_time_minutes, not from lifecycle.
+                "lifecycle": "completed",
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
         )

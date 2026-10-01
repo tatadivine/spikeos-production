@@ -13,6 +13,7 @@ const severityTone = {
 
 type AlertCardProps = {
   alert: AlertItem;
+  ownerName?: string;
   onRespond?: () => void;
   onReview?: () => void;
   onDismiss?: () => void;
@@ -21,6 +22,7 @@ type AlertCardProps = {
 
 export function AlertCard({
   alert,
+  ownerName,
   onRespond,
   onReview,
   onDismiss,
@@ -133,6 +135,7 @@ export function AlertCard({
 
           <p className="mt-0.5 text-xs text-[var(--color-ink-500)]">
             {alert.source}
+            {ownerName ? ` · ${ownerName}` : ""}
           </p>
         </div>
       </div>

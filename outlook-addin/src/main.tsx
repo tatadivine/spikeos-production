@@ -30,7 +30,7 @@ type InboxMessage = {
   excluded: boolean;
   exclusion_reason?: string;
   sla_hours: number;
-  status: "needs_response" | "overdue" | "excluded";
+  status: "needs_response" | "overdue" | "excluded" | "completed" | "waiting";
   status_label: string;
   is_read?: boolean;
   web_link?: string;
@@ -44,8 +44,10 @@ type InboxPayload = {
     needs_response: number;
     overdue: number;
     excluded: number;
+    completed?: number;
     customer_vendor?: number;
     response_score?: number;
+    within_24h?: number;
     open_commitments?: number;
     coaching_signals?: number;
   };
@@ -144,7 +146,7 @@ function App() {
 
   const summary = inbox?.summary;
   const attention = useMemo(
-    () => (inbox?.messages || []).filter((m) => m.status !== "excluded").slice(0, 6),
+    () => (inbox?.messages || []).filter((m) => m.status === "needs_response" || m.status === "overdue").slice(0, 6),
     [inbox],
   );
 
@@ -256,13 +258,13 @@ function App() {
 
               <section className={`alert ${selected.status}`}>
                 <div className="alert-title">
-                  {selected.status === "overdue" ? <><AlertTriangle size={14} /> RESPONSE OVERDUE</> : <><Clock3 size={14} /> RESPONSE NEEDED</>}
+                  {selected.status === "completed" ? <><CheckCircle2 size={14} /> RESPONSE COMPLETED</> : selected.status === "overdue" ? <><AlertTriangle size={14} /> RESPONSE OVERDUE</> : <><Clock3 size={14} /> RESPONSE NEEDED</>}
                 </div>
-                <div>{formatAge(selected.age_hours)} open · SLA {selected.sla_hours}h · {selected.category}</div>
+                <div>{selected.status === "completed" ? "Completed in SpikeOS" : `${formatAge(selected.age_hours)} open`} · SLA {selected.sla_hours}h · {selected.category}</div>
               </section>
 
               <div className="lifecycle">
-                <span className="active">RECEIVED</span><span>ACKNOWLEDGED</span><span>ANSWERED</span><span>CLOSED</span>
+                <span className="active">RECEIVED</span><span>ACKNOWLEDGED</span><span className={selected.status === "completed" ? "active" : ""}>ANSWERED</span><span>CLOSED</span>
               </div>
 
               <div className="card">
@@ -272,11 +274,11 @@ function App() {
 
               <div className="card">
                 <div className="muted">Recommended action</div>
-                <strong>{selected.status === "overdue" ? "Respond now and record the next step" : "Review and respond within the SLA"}</strong>
+                <strong>{selected.status === "completed" ? "No response needed — already completed" : selected.status === "overdue" ? "Respond now and record the next step" : "Review and respond within the SLA"}</strong>
                 <button className="primary" onClick={() => selected.web_link && window.open(selected.web_link, "_blank")}>Open message in Outlook</button>
               </div>
 
-              <div className="stats"><div><b>88</b><small>Response score</small></div><div><b>{summary?.overdue ?? 0}</b><small>Overdue</small></div><div><b>92%</b><small>Within 24h</small></div></div>
+              <div className="stats"><div><b>{summary?.response_score ?? 0}</b><small>Response score</small></div><div><b>{summary?.overdue ?? 0}</b><small>Overdue</small></div><div><b>{summary?.within_24h ?? 0}%</b><small>Within 24h</small></div></div>
 
               <button className="link" onClick={() => window.open(`${SPIKEOS_URL}/#/communication`, "_blank")}>View full record in SpikeOS →</button>
             </>

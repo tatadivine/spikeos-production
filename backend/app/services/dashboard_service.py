@@ -26,6 +26,21 @@ def compute_employee(profile: dict, communications: list[dict], commitments: lis
         "overdueFollowUps": len(overdue), "openCommitments": len(open_commitments), "slaCompliancePct": score,
     }
 
+def communication_status(c: dict) -> str:
+    """Single status definition shared by the Dashboard and the Outlook panel.
+
+    Supabase answered_at is authoritative: an answered communication is completed
+    regardless of how old the original Graph message is. Unanswered communications
+    are evaluated against their SLA at read time so the status never goes stale.
+    """
+    if c.get("excluded"):
+        return "completed" if c.get("answered_at") else "needs_response"
+    if c.get("answered_at"):
+        return "completed"
+    if c.get("lifecycle") == "waiting":
+        return "waiting"
+    return "overdue" if _hours(c.get("received_at")) > (c.get("sla_hours") or 48) else "needs_response"
+
 def map_communication(c: dict, profile_map: dict):
     owner = profile_map.get(c.get("owner_id"), {})
     sender = c.get("sender_email") or "Unknown"
@@ -33,17 +48,21 @@ def map_communication(c: dict, profile_map: dict):
       "id": c.get("id"), "contact": c.get("sender_name") or sender, "organization": c.get("organization") or sender.split("@")[-1],
       "category": c.get("category", "internal"), "subject": c.get("subject") or "(No subject)", "bodyPreview": c.get("body_preview") or "",
       "receivedAt": c.get("received_at"), "respondedAt": c.get("answered_at"), "responseTimeMinutes": c.get("response_time_minutes"),
-      "status": c.get("lifecycle") if c.get("lifecycle") in {"needs_response","waiting","completed","overdue"} else ("completed" if c.get("answered_at") else "needs_response"),
+      "status": communication_status(c), "webLink": c.get("web_link"),
       "priority": c.get("priority", "normal"), "ownerId": c.get("owner_id"), "nextStep": c.get("next_step") or "Review and respond",
       "qualityScore": c.get("quality_score") or 0, "aiFinding": None, "timeline": [], "excluded": c.get("excluded", False), "exclusionReason": c.get("exclusion_reason")
     }
+
+def _aware(value: str) -> datetime:
+    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 def map_commitment(c: dict):
     due = c.get("due_date")
     status = c.get("status", "open")
     if status == "completed": ui = "completed"
     elif due:
-        dt = datetime.fromisoformat(due.replace("Z", "+00:00")); now=datetime.now(timezone.utc); days=(dt-now).total_seconds()/86400
+        dt = _aware(due); now=datetime.now(timezone.utc); days=(dt-now).total_seconds()/86400
         ui = "overdue" if days < 0 else "due_today" if days < 1 else "due_this_week" if days < 7 else "active"
     else: ui="active"
-    return {"id":c.get("id"),"title":c.get("title"),"source":c.get("source") or "Outlook","ownerId":c.get("owner_id"),"createdAt":c.get("created_at"),"dueDate":due or "","status":ui,"daysOverdue":max(0,int(-((datetime.fromisoformat(due.replace("Z","+00:00"))-datetime.now(timezone.utc)).total_seconds()/86400))) if due and ui=="overdue" else 0,"nextAction":c.get("next_step") or "Close the loop"}
+    return {"id":c.get("id"),"title":c.get("title"),"source":c.get("source") or "Outlook","ownerId":c.get("owner_id"),"createdAt":c.get("created_at"),"dueDate":due or "","status":ui,"daysOverdue":max(0,int(-((_aware(due)-datetime.now(timezone.utc)).total_seconds()/86400))) if due and ui=="overdue" else 0,"nextAction":c.get("next_step") or "Close the loop"}

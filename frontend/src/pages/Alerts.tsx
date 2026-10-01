@@ -6,6 +6,9 @@ import { Tabs } from "../components/ui/FilterBar";
 import { AlertCard } from "../components/communication/AlertCard";
 import { EmptyState, ErrorState } from "../components/ui/States";
 import { api } from "../lib/api";
+import { loadLiveBootstrap } from "../lib/liveBootstrap";
+import { getEmployee } from "../mock/generator";
+import { useSession } from "../lib/SessionContext";
 import type { AlertCategory, AlertItem } from "../types";
 
 const CATEGORY_LABEL: Record<AlertCategory, string> = {
@@ -19,6 +22,7 @@ const CATEGORY_LABEL: Record<AlertCategory, string> = {
 
 export function Alerts() {
   const navigate = useNavigate();
+  const { employeeId } = useSession();
 
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,6 +50,13 @@ export function Alerts() {
   useEffect(() => {
     void loadAlerts();
   }, []);
+
+  // After a persisted action, reload this page and re-sync the shared
+  // bootstrap state used by the Dashboard.
+  function afterAction() {
+    void loadAlerts();
+    void loadLiveBootstrap().catch(() => undefined);
+  }
 
   const filtered =
     tab === "all"
@@ -105,6 +116,11 @@ export function Alerts() {
             <AlertCard
               key={alert.id}
               alert={alert}
+              ownerName={
+                alert.ownerId && alert.ownerId !== employeeId
+                  ? getEmployee(alert.ownerId)?.name
+                  : undefined
+              }
               onRespond={() => {
                 if (alert.communicationId) {
                   navigate(
@@ -113,13 +129,13 @@ export function Alerts() {
                 }
               }}
               onReview={() => {
-                void loadAlerts();
+                afterAction();
               }}
               onDismiss={() => {
-                void loadAlerts();
+                afterAction();
               }}
               onAddCommitment={() => {
-                void loadAlerts();
+                afterAction();
               }}
             />
           ))}

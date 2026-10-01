@@ -23,11 +23,13 @@ from app.services.ingestion_service import (
 )
 from app.services.intelligence import communication_context
 from app.services.dashboard_service import (
+    communication_status,
     compute_employee,
     map_communication,
     map_commitment,
 )
 from app.services.openai_service import analyze_message
+from app.services.alert_service import map_alert, sync_overdue_alerts
 from app.services.powerbi_service import get_powerbi_embed_config
 
 
@@ -37,6 +39,11 @@ router = APIRouter()
 class Commitment(BaseModel):
     communication_id: str | None = None
     title: str
+    due_date: str | None = None
+    next_step: str | None = None
+
+
+class AlertCommitment(BaseModel):
     due_date: str | None = None
     next_step: str | None = None
 
@@ -150,6 +157,7 @@ async def _bootstrap(user: dict):
     owners = allowed_owner_ids(user["id"], user)
 
     comms = repo.list_communications(owners)
+    sync_overdue_alerts(owners, comms)
     commitments = repo.list_commitments(owners)
     followup_rows = repo.list_followups(owners)
     alerts = repo.list_alerts(owners)
@@ -198,38 +206,7 @@ async def _bootstrap(user: dict):
     ]
 
     mapped_alerts = [
-        {
-            "id": a.get("id"),
-            "category": (
-                "overdue"
-                if a.get("severity") == "high"
-                else "needs_response"
-            ),
-            "severity": a.get(
-                "severity",
-                "medium",
-            ),
-            "time": a.get("created_at"),
-            "source": a.get(
-                "title",
-                "Outlook",
-            ),
-            "reason": a.get(
-                "title",
-                "Alert",
-            ),
-            "recommendedAction": (
-                (a.get("details") or {}).get(
-                    "action",
-                    "Review communication",
-                )
-            ),
-        "ownerId": a.get("owner_id"),
-        "communicationId": (
-            a.get("communication_id")
-            or (a.get("details") or {}).get("communication_id")
-        ),
-    }
+        map_alert(a)
         for a in alerts
     ]
 
@@ -480,7 +457,7 @@ async def outlook_inbox_summary(
     items = []
 
     for m in messages:
-        await ingest_selected_message(
+        stored = await ingest_selected_message(
             m,
             user["id"],
         )
@@ -517,19 +494,24 @@ async def outlook_inbox_summary(
                 / 3600,
             )
 
-        status = (
-            "excluded"
-            if ctx["excluded"]
-            else (
+        # Supabase is the source of truth for SpikeOS state: a message
+        # completed from the Dashboard stays completed here, using the same
+        # status rules as the Dashboard (communication_status).
+        if ctx["excluded"]:
+            status = "excluded"
+        elif stored:
+            status = communication_status(stored)
+        else:
+            status = (
                 "overdue"
                 if age > ctx["sla_hours"]
                 else "needs_response"
             )
-        )
 
         items.append(
             {
                 "id": m.get("id"),
+                "communication_id": (stored or {}).get("id"),
                 "conversation_id": m.get(
                     "conversationId"
                 ),
@@ -562,15 +544,12 @@ async def outlook_inbox_summary(
                 ),
                 "sla_hours": ctx["sla_hours"],
                 "status": status,
-                "status_label": (
-                    "Excluded"
-                    if status == "excluded"
-                    else (
-                        "Overdue"
-                        if status == "overdue"
-                        else "Response needed"
-                    )
-                ),
+                "status_label": {
+                    "excluded": "Excluded",
+                    "overdue": "Overdue",
+                    "completed": "Completed",
+                    "waiting": "Waiting",
+                }.get(status, "Response needed"),
             }
         )
 
@@ -658,8 +637,19 @@ async def outlook_inbox_summary(
                     == "excluded"
                 ]
             ),
+            "completed": len(
+                [
+                    i
+                    for i in items
+                    if i["status"]
+                    == "completed"
+                ]
+            ),
             "response_score": employee_metrics[
                 "responseScore"
+            ],
+            "within_24h": employee_metrics[
+                "answeredWithin24hPct"
             ],
             "open_commitments": len(
                 [
@@ -935,6 +925,7 @@ async def dismiss_alert(
 @router.post("/alerts/{alert_id}/commitment")
 async def create_alert_commitment(
     alert_id: str,
+    payload: AlertCommitment | None = None,
     user=Depends(get_current_user),
 ):
     alert = repo.get_alert(alert_id)
@@ -954,7 +945,18 @@ async def create_alert_commitment(
         )
 
     details = alert.get("details") or {}
-    communication_id = alert.get("communication_id")
+
+    # Idempotent: an alert converts into at most one commitment.
+    if details.get("commitment_id"):
+        return {
+            "id": details["commitment_id"],
+            "status": "exists",
+        }
+
+    communication_id = (
+        alert.get("communication_id")
+        or details.get("communication_id")
+    )
 
     subject = (
         details.get("subject")
@@ -962,18 +964,38 @@ async def create_alert_commitment(
         or "Follow up on alert"
     )
 
+    payload = payload or AlertCommitment()
+
     commitment = repo.insert_commitment(
         {
             "owner_id": alert.get("owner_id") or user["id"],
             "communication_id": communication_id,
             "title": subject,
-            "due_date": datetime.now(timezone.utc).date().isoformat(),
-            "status": "active",
-            "next_step": details.get(
-                "action",
-                "Review and follow up on this alert",
+            "due_date": (
+                payload.due_date
+                or datetime.now(timezone.utc).date().isoformat()
+            ),
+            "status": "open",
+            "next_step": (
+                payload.next_step
+                or details.get(
+                    "action",
+                    "Review and follow up on this alert",
+                )
             ),
         }
+    )
+
+    repo.update_alert(
+        alert_id,
+        {
+            "status": "converted",
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+            "details": {
+                **details,
+                "commitment_id": (commitment or {}).get("id"),
+            },
+        },
     )
 
     repo.insert_audit(
@@ -981,138 +1003,10 @@ async def create_alert_commitment(
         action="create_commitment_from_alert",
         target_type="alert",
         target_id=alert_id,
+        metadata={"commitment_id": (commitment or {}).get("id")},
     )
 
     return commitment
-
-
-
-
-
-
-@router.post("/alerts/{alert_id}/review")
-async def review_alert(
-    alert_id: str,
-    user=Depends(get_current_user),
-):
-    alert = repo.get_alert(alert_id)
-
-    if not alert:
-        raise HTTPException(status_code=404, detail="Alert not found")
-
-    owners = allowed_owner_ids(user["id"], user)
-
-    if alert.get("owner_id") not in owners:
-        raise HTTPException(status_code=403, detail="Not authorized to review this alert")
-
-    updated = repo.update_alert(
-        alert_id,
-        {
-            "status": "reviewed",
-            "resolved_at": datetime.now(timezone.utc).isoformat(),
-        },
-    )
-
-    if not updated:
-        raise HTTPException(status_code=404, detail="Alert not found")
-
-    repo.insert_audit(
-        actor_id=user["id"],
-        action="review_alert",
-        target_type="alert",
-        target_id=alert_id,
-    )
-
-    return updated[0]
-
-
-@router.post("/alerts/{alert_id}/dismiss")
-async def dismiss_alert(
-    alert_id: str,
-    user=Depends(get_current_user),
-):
-    alert = repo.get_alert(alert_id)
-
-    if not alert:
-        raise HTTPException(status_code=404, detail="Alert not found")
-
-    owners = allowed_owner_ids(user["id"], user)
-
-    if alert.get("owner_id") not in owners:
-        raise HTTPException(status_code=403, detail="Not authorized to dismiss this alert")
-
-    updated = repo.update_alert(
-        alert_id,
-        {
-            "status": "dismissed",
-            "resolved_at": datetime.now(timezone.utc).isoformat(),
-        },
-    )
-
-    if not updated:
-        raise HTTPException(status_code=404, detail="Alert not found")
-
-    repo.insert_audit(
-        actor_id=user["id"],
-        action="dismiss_alert",
-        target_type="alert",
-        target_id=alert_id,
-    )
-
-    return updated[0]
-
-
-@router.post("/alerts/{alert_id}/commitment")
-async def create_alert_commitment(
-    alert_id: str,
-    user=Depends(get_current_user),
-):
-    alert = repo.get_alert(alert_id)
-
-    if not alert:
-        raise HTTPException(status_code=404, detail="Alert not found")
-
-    owners = allowed_owner_ids(user["id"], user)
-
-    if alert.get("owner_id") not in owners:
-        raise HTTPException(
-            status_code=403,
-            detail="Not authorized to create a commitment from this alert",
-        )
-
-    details = alert.get("details") or {}
-    communication_id = alert.get("communication_id")
-
-    subject = (
-        details.get("subject")
-        or alert.get("title")
-        or "Follow up on alert"
-    )
-
-    commitment = repo.insert_commitment(
-        {
-            "owner_id": alert.get("owner_id") or user["id"],
-            "communication_id": communication_id,
-            "title": subject,
-            "due_date": datetime.now(timezone.utc).date().isoformat(),
-            "status": "active",
-            "next_step": details.get(
-                "action",
-                "Review and follow up on this alert",
-            ),
-        }
-    )
-
-    repo.insert_audit(
-        actor_id=user["id"],
-        action="create_commitment_from_alert",
-        target_type="alert",
-        target_id=alert_id,
-    )
-
-    return commitment
-
-
 
 
 

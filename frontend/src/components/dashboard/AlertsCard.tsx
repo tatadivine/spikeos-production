@@ -12,6 +12,7 @@ import { Card } from "../ui/Card";
 import { Modal } from "../ui/Modal";
 import { useSession } from "../../lib/SessionContext";
 import { api } from "../../lib/api";
+import { loadLiveBootstrap } from "../../lib/liveBootstrap";
 
 export interface AlertRow {
   id: string;
@@ -25,6 +26,13 @@ export interface AlertRow {
     | "Respond Now"
     | "Add Commitment"
     | "Review";
+  webLink?: string | null;
+}
+
+// Re-sync the shared bootstrap state so other pages (and a remount of this
+// card) reflect the persisted alert status instead of the stale snapshot.
+function refreshSharedState() {
+  void loadLiveBootstrap().catch(() => undefined);
 }
 
 export function AlertsCard({
@@ -90,6 +98,8 @@ export function AlertsCard({
         (count) => count + 1
       );
 
+      refreshSharedState();
+
       setModalAlert(null);
 
       setForm({
@@ -134,6 +144,8 @@ export function AlertsCard({
         (count) => count + 1
       );
 
+      refreshSharedState();
+
       setModalAlert(null);
 
       pushToast(
@@ -162,6 +174,10 @@ export function AlertsCard({
         `/alerts/${alert.id}/commitment`,
         {
           method: "POST",
+          body: JSON.stringify({
+            due_date: form.due,
+            next_step: form.next || null,
+          }),
         }
       );
 
@@ -175,6 +191,8 @@ export function AlertsCard({
       setResolvedCount(
         (count) => count + 1
       );
+
+      refreshSharedState();
 
       setModalAlert(null);
 
@@ -385,12 +403,21 @@ export function AlertsCard({
 
                 <button
                   type="button"
-                  onClick={() =>
+                  onClick={() => {
+                    if (modalAlert.webLink) {
+                      window.open(
+                        modalAlert.webLink,
+                        "_blank",
+                        "noopener"
+                      );
+                      return;
+                    }
+
                     pushToast(
                       "Open Outlook to send the response, then refresh SpikeOS.",
                       "success"
-                    )
-                  }
+                    );
+                  }}
                   className="w-full rounded-md bg-[var(--color-blue-600)] py-2 text-sm font-medium text-white"
                 >
                   Open Outlook
