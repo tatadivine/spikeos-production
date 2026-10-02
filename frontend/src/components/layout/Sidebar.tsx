@@ -65,7 +65,7 @@ export function Sidebar({
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto px-3 pt-4 pb-4 scrollbar-none">
+      <nav className="flex-1 overflow-y-auto px-3 pt-4 pb-4 sidebar-scrollbar">
         {nav.map((item) => {
           const Icon = item.icon;
           const hasChildren = !!item.children?.length;

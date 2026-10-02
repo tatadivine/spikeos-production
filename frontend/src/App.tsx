@@ -2,6 +2,7 @@ import { HashRouter, Routes, Route, Navigate, useLocation } from "react-router-d
 import { type ReactNode } from "react";
 
 import { SessionProvider, useSession } from "./lib/SessionContext";
+import { ProductTour } from "./components/layout/ProductTour";
 
 import { Login } from "./pages/Login";
 import { Dashboard } from "./pages/Dashboard";
@@ -38,8 +39,18 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   const location = useLocation();
   const { ready, isAuthenticated } = useSession();
 
-  if (!ready) return <div className="flex h-screen items-center justify-center bg-[var(--color-navy-950)] text-white/60">Checking Microsoft session…</div>;
-  if (!isAuthenticated) return <Navigate to="/" replace state={{ from: location.pathname }} />;
+  if (!ready) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[var(--color-navy-950)] text-white/60">
+        Checking Microsoft session…
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/" replace state={{ from: location.pathname }} />;
+  }
+
   return <>{children}</>;
 }
 
@@ -49,46 +60,266 @@ export default function App() {
       <HashRouter>
         <Routes>
           <Route path="/" element={<Login />} />
-          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
 
-          <Route path="/communication" element={<ProtectedRoute><CommunicationPage /></ProtectedRoute>} />
-          <Route path="/communication/:id" element={<ProtectedRoute><CommunicationDetail /></ProtectedRoute>} />
-          <Route path="/commitments" element={<ProtectedRoute><Commitments /></ProtectedRoute>} />
-          <Route path="/followups" element={<ProtectedRoute><FollowUps /></ProtectedRoute>} />
-          <Route path="/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
 
-          <Route path="/performance" element={<ProtectedRoute><MyPerformance /></ProtectedRoute>} />
-          <Route path="/coaching" element={<ProtectedRoute><Coaching /></ProtectedRoute>} />
-          <Route path="/evidence" element={<ProtectedRoute><Evidence /></ProtectedRoute>} />
+          <Route
+            path="/communication"
+            element={
+              <ProtectedRoute>
+                <CommunicationPage />
+              </ProtectedRoute>
+            }
+          />
 
-          <Route path="/customers" element={<ProtectedRoute><Customers /></ProtectedRoute>} />
-          <Route path="/customers/:id" element={<ProtectedRoute><CustomerDetail /></ProtectedRoute>} />
+          <Route
+            path="/communication/:id"
+            element={
+              <ProtectedRoute>
+                <CommunicationDetail />
+              </ProtectedRoute>
+            }
+          />
 
-          <Route path="/team" element={<ProtectedRoute><TeamOverview /></ProtectedRoute>} />
-          <Route path="/team/trends" element={<ProtectedRoute><TeamTrends /></ProtectedRoute>} />
-          <Route path="/team/:employeeId" element={<ProtectedRoute><EmployeeDetail /></ProtectedRoute>} />
-          <Route path="/reviews" element={<ProtectedRoute><Reviews /></ProtectedRoute>} />
+          <Route
+            path="/commitments"
+            element={
+              <ProtectedRoute>
+                <Commitments />
+              </ProtectedRoute>
+            }
+          />
 
-          <Route path="/organization" element={<ProtectedRoute><Organization /></ProtectedRoute>} />
-          <Route path="/organization/departments" element={<ProtectedRoute><Departments /></ProtectedRoute>} />
-          <Route path="/organization/trends" element={<ProtectedRoute><OrganizationTrends /></ProtectedRoute>} />
+          <Route
+            path="/followups"
+            element={
+              <ProtectedRoute>
+                <FollowUps />
+              </ProtectedRoute>
+            }
+          />
 
-          <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
-          <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
-          <Route path="/outlook-coach" element={<ProtectedRoute><OutlookCoachPage /></ProtectedRoute>} />
+          <Route
+            path="/alerts"
+            element={
+              <ProtectedRoute>
+                <Alerts />
+              </ProtectedRoute>
+            }
+          />
 
-          <Route path="/settings" element={<ProtectedRoute><SettingsGeneral /></ProtectedRoute>} />
-          <Route path="/settings/scoring" element={<ProtectedRoute><SettingsScoring /></ProtectedRoute>} />
-          <Route path="/settings/exclusions" element={<ProtectedRoute><SettingsExclusions /></ProtectedRoute>} />
-          <Route path="/settings/permissions" element={<ProtectedRoute><SettingsPermissions /></ProtectedRoute>} />
-          <Route path="/settings/integrations" element={<ProtectedRoute><SettingsIntegrations /></ProtectedRoute>} />
-          <Route path="/settings/audit" element={<ProtectedRoute><SettingsAudit /></ProtectedRoute>} />
+          <Route
+            path="/performance"
+            element={
+              <ProtectedRoute>
+                <MyPerformance />
+              </ProtectedRoute>
+            }
+          />
 
-          <Route path="/help" element={<ProtectedRoute><Help /></ProtectedRoute>} />
+          <Route
+            path="/coaching"
+            element={
+              <ProtectedRoute>
+                <Coaching />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/evidence"
+            element={
+              <ProtectedRoute>
+                <Evidence />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/customers"
+            element={
+              <ProtectedRoute>
+                <Customers />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/customers/:id"
+            element={
+              <ProtectedRoute>
+                <CustomerDetail />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/team"
+            element={
+              <ProtectedRoute>
+                <TeamOverview />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/team/trends"
+            element={
+              <ProtectedRoute>
+                <TeamTrends />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/team/:employeeId"
+            element={
+              <ProtectedRoute>
+                <EmployeeDetail />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/reviews"
+            element={
+              <ProtectedRoute>
+                <Reviews />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/organization"
+            element={
+              <ProtectedRoute>
+                <Organization />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/organization/departments"
+            element={
+              <ProtectedRoute>
+                <Departments />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/organization/trends"
+            element={
+              <ProtectedRoute>
+                <OrganizationTrends />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/analytics"
+            element={
+              <ProtectedRoute>
+                <Analytics />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/reports"
+            element={
+              <ProtectedRoute>
+                <Reports />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/outlook-coach"
+            element={
+              <ProtectedRoute>
+                <OutlookCoachPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute>
+                <SettingsGeneral />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/settings/scoring"
+            element={
+              <ProtectedRoute>
+                <SettingsScoring />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/settings/exclusions"
+            element={
+              <ProtectedRoute>
+                <SettingsExclusions />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/settings/permissions"
+            element={
+              <ProtectedRoute>
+                <SettingsPermissions />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/settings/integrations"
+            element={
+              <ProtectedRoute>
+                <SettingsIntegrations />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/settings/audit"
+            element={
+              <ProtectedRoute>
+                <SettingsAudit />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/help"
+            element={
+              <ProtectedRoute>
+                <Help />
+              </ProtectedRoute>
+            }
+          />
 
           <Route path="*" element={<Login />} />
         </Routes>
+
+        {/* Mounted once so the tour state survives route changes */}
+        <ProductTour />
       </HashRouter>
     </SessionProvider>
   );
 }
+

@@ -2,7 +2,6 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { ToastContainer } from "../ui/Toast";
-import { ProductTour } from "./ProductTour";
 
 export function AppShell({
   pageTitle,
@@ -87,8 +86,7 @@ export function AppShell({
       </div>
 
       <ToastContainer />
-
-      <ProductTour />
     </div>
   );
 }
+
