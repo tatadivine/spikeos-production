@@ -10,7 +10,6 @@ import {
   PlayCircle,
   User,
   X,
-  Zap,
 } from "lucide-react";
 import {
   useSession,
@@ -79,20 +78,12 @@ export function Header({
         </button>
 
         {/* Brand */}
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-md bg-[var(--color-orange-500)] sm:h-9 sm:w-9">
-            <Zap
-              size={17}
-              className="text-white"
-              fill="currentColor"
-            />
-          </span>
-
-          <div className="hidden leading-tight sm:block">
-            <p className="text-[13px] font-bold uppercase tracking-wide">
-              Spike Electric
-            </p>
-          </div>
+        <div className="flex shrink-0 items-center">
+          <img
+            src="/logo.png"
+            alt="SpikeOS"
+            className="h-8 w-auto max-w-[150px] object-contain sm:h-9 sm:max-w-[165px]"
+          />
         </div>
 
         <div className="hidden h-8 w-px bg-white/15 sm:block" />
